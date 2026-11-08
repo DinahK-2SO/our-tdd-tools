@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "intelligent-terminal",
+  "repositoryNames": ["intelligent-terminal"],
+  "directoryNames": ["intelligent-terminal"],
+  "commonDefaults": {
+    "BaseBranch": "main"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "head": "REPLACE_WITH_FULL_PUBLISHED_SHA",
+  "publication": { "path": "publication.json", "sha256": "REPLACE_WITH_FILE_SHA256" },
+  "receipt": { "path": "pipeline\\build-receipt.json", "sha256": "REPLACE_WITH_FILE_SHA256" },
+  "realAcceptance": { "path": "real\\real-acceptance.json", "sha256": "REPLACE_WITH_FILE_SHA256" },
+  "requiredTests": [ "REPLACE_WITH_EXACT_NUNIT_CASE_NAME" ],
+  "results": [
+    {
+      "path": "pipeline\\e2e\\results.xml",
+      "sha256": "REPLACE_WITH_FILE_SHA256",
+      "provenance": { "path": "pipeline\\pipeline-state.json", "sha256": "REPLACE_WITH_FILE_SHA256" }
+    }
+  ],
+  "visual": {
+    "required": true,
+    "inventories": [ { "path": "visual.json", "sha256": "REPLACE_WITH_FILE_SHA256" } ],
+    "requiredFrames": [ { "path": "real\\real-result.png", "sha256": "REPLACE_WITH_FILE_SHA256" } ]
+  },
+  "reviewSnapshot": { "path": "review-snapshot.json", "sha256": "REPLACE_WITH_FILE_SHA256" },
+  "reviewTriage": {
+    "snapshotSha256": "REPLACE_WITH_SNAPSHOT_DATA_SHA256",
+    "reviewId": "REPLACE_WITH_TRIAGED_REVIEW_ID",
+    "complete": false,
+    "noNewFindings": false,
+    "annotationsTriaged": false
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "WorkingDirectory": { "type": "string" },
+    "Keyword": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "BaseRemote": { "type": "string" },
+    "BaseBranch": { "type": "string" },
+    "BranchPrefix": { "type": "string", "minLength": 1 },
+    "WorktreeRoot": { "type": "string" },
+    "ProjectId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "Offline": { "type": "boolean" }
+  }
+}

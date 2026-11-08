@@ -1,0 +1,8 @@
+{
+  "head": "REPLACE_WITH_FULL_PUBLISHED_SHA",
+  "remote": "origin",
+  "branch": "REPLACE_WITH_PUBLISH_BRANCH",
+  "repository": "OWNER/REPOSITORY",
+  "pullRequest": 0,
+  "pushedUtc": "REPLACE_WITH_OBSERVED_PUSH_COMPLETION_TIME"
+}
