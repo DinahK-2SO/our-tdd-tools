@@ -1,4 +1,6 @@
 {
   "IncludeTools": true,
-  "PackageSelector": "Dev"
+  "PackageSelector": "Dev",
+  "ComClsid": "",
+  "CopilotConfigPath": ""
 }

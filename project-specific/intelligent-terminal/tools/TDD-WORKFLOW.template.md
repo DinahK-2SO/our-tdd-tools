@@ -356,10 +356,11 @@ Both harness categories stay dev/local-only, even zero-token real login.
 - Distinguish introduced defects, directly coupled issues and inherited/out-of-scope limitations.
   Agree scope before general framework work. Preserve valid deferred findings in a real tracker
   and link it courteously; do not keep growing the diff to satisfy a repeated review headline.
-- Keep detailed triage and fix evidence local. The only permitted review comment is
-  an evidence-based won't-fix explanation. Do not post fix acknowledgements, progress
-  or status replies, delete comments, or overwrite teammate PR prose. Sharing the
-  authenticated account does not establish text ownership.
+- Keep detailed triage and fix evidence local. Follow the repository policy and
+  selected user profile for review replies, thread resolution and merge preferences.
+  Public writes require explicit authorization; do not delete comments or overwrite
+  teammate prose without it. Sharing an authenticated account does not establish
+  text ownership.
 - Inspect visible inline/file-level comments, every relevant review body including
   suppressed findings, and generated/suppressed counts.
 - Read the raw review body and recognize current zero-comment wording such as
@@ -393,10 +394,10 @@ Both harness categories stay dev/local-only, even zero-token real login.
   against that exact HEAD in parallel with online review.
 - Read and follow the applicable repository PR template, preserving its headings, comments,
   checklist and ordering instead of substituting a generic body.
-  The title is at most 20 words and **every description section** is at most 100 words.
+  Apply its required language and length limits plus the selected user profile.
   Fill placeholders accurately; unused sections may be empty or briefly marked not applicable.
   Do not invent issue references or checked results.
-- Write PR descriptions in concise English, focused on what changes and how it works.
+- Write PR descriptions under the selected writing preferences, focused on what changes and how it works.
   The summary states the user-visible change and why it matters; the detailed section explains
   the key mechanism, scope and preserved behavior. Prefer short, reader-friendly bullets,
   not a file-by-file change diary or repeated claims.
@@ -406,9 +407,9 @@ Both harness categories stay dev/local-only, even zero-token real login.
 - Internal progress, unfinished-work notes, cost or authorization decisions, and task
   coordination belong on the dev branch, not in the PR description. Keep private framework
   paths, machine-specific evidence and raw logs out of public prose.
-- Within an already requested PR-delivery task, generate and maintain the agent-authored
-  description from these rules. Do not wait for per-description wording approval or confirmation.
-  An explicit user request to draft only, discuss or pause still takes precedence.
+- Within an already requested PR-delivery task, maintain the authorized agent-authored
+  description under the selected user profile. Follow explicit approval requirements;
+  a request to draft only, discuss or pause still takes precedence.
 - Preserve teammate edits when updating a description; change only clearly agent-authored
   text and do not infer authorship from a shared login. These writing rules do not authorize
   unrelated scope changes, publication of private content or merging the PR.
@@ -423,12 +424,11 @@ Both harness categories stay dev/local-only, even zero-token real login.
 - Critically triage every visible, file-level, suppressed and spelling finding against
   the exact code and behavior; do not blindly accept automated comments or ignore green
   check annotations.
-- Push valid fixes with deterministic evidence and record their dispositions locally,
-  without fix-acknowledgement replies. Only won't-fix explanations may be commented,
-  and those must leave the thread open.
-- Never merge the PR to `main`. Never resolve, dismiss, close or clean up any active
-  review thread, even when a later iteration fixed it or made it outdated. Leave all
-  active comments for the user.
+- Push authorized fixes with deterministic evidence and record their dispositions
+  locally. Apply the selected review interaction policy to any public follow-up.
+- Merging and resolving, dismissing or closing review threads require explicit
+  authorization and must respect stricter project or user preferences. A successful
+  fix or check does not itself grant that authorization.
 
 ## Phase-Aware Autopilot Watchdogs
 
@@ -509,11 +509,10 @@ Retain these Terminal workflow constraints alongside the common rules:
   work. Preserve package/process ownership, the current chat and any manual-app
   reservation; monitoring is not permission to close or redeploy an application.
 - Apply the public-writing boundaries from **PR and Parallel Validation** to
-  scheduled follow-up, implementation and review-fix loops alike. Only explicitly
-  permitted, evidence-based won't-fix explanations may be posted by the owning
-  task, leaving threads open. Never post fix/progress acknowledgements, resolve,
-  dismiss or close active threads, delete or rewrite previous comments, merge
-  the PR, or overwrite teammate prose. A shared login is not proof of authorship.
+  scheduled follow-up, implementation and review-fix loops alike. The selected
+  user profile may impose stricter reply or thread-state preferences; monitoring
+  grants no public-write or merge authority. Preserve prior evidence and other
+  authors' prose. A shared login is not proof of authorship.
 - Preserve historical evidence when current merge-readiness changes. Keep
   credentials, request budgets, discussion pauses and synchronous bounded
   build/test execution unchanged.
@@ -548,15 +547,14 @@ accepted product feature.
 - [ ] `Test-DevPublishReferenceIsolation.ps1` passes for the complete dev-only range and current
   changed/untracked text files.
 - [ ] Exact publish/review identifiers are local-only and absent from tracked dev history.
-- [ ] PR title is at most 20 words; every description section is at most 100 words,
-  following the repository template with concise English what/how and factual validation.
-- [ ] The description contains no internal progress ledger and was maintained without a
-  separate wording-approval gate within the requested PR-delivery task.
+- [ ] PR prose follows the repository template and selected language/length preferences,
+  explaining what/how and actual validation without an internal progress ledger.
+- [ ] Description edits followed the task's explicit approval requirements.
 - [ ] Online review and same-HEAD local E2E ran in parallel.
 - [ ] While the PR remains open, a real review/base-conflict watcher is active with
   a recorded heartbeat, or an explicit user pause/runner interruption is recorded.
 - [ ] Visible, file-level, suppressed and spelling findings were critically triaged.
-- [ ] Valid fixes are pushed; every active review thread remains unresolved.
-- [ ] The agent did not merge the PR to `main`.
+- [ ] Authorized fixes are pushed; review-thread actions follow the selected policy.
+- [ ] No thread-state change or merge occurred without explicit authorization.
 - [ ] Commits are pushed and remote synchronization is verified.
 - [ ] Tracking is self-contained enough for another machine/engineer to continue.

@@ -69,6 +69,86 @@ function Set-WinpdManagedFile {
     Write-WinpdJson $Plan.Paths.State $State
 }
 
+function Invoke-WinpdPushRemoteSetup {
+    param(
+        [Collections.IDictionary]$Plan,
+        [ValidateSet('Check', 'Apply', 'Verify')][string]$Phase,
+        [Collections.IDictionary]$State
+    )
+    $remotes = $null
+    foreach ($kind in 'Dev', 'Publish') {
+        $requested = $Plan.Parameters.Common["${kind}Remote"]
+        if (-not $requested) { continue }
+        if ($null -eq $remotes) {
+            $remotes = @((Invoke-WinpdGit $Plan.Repository.Root @('remote')).Lines)
+        }
+        if ($requested -cnotin $remotes) { throw "Unknown ${kind}Remote; choose a configured remote name." }
+        $key = "branch.$($Plan.Branches[$kind]).pushRemote"
+        $current = Invoke-WinpdGit $Plan.Repository.Root @('config', '--local', '--get-all', $key) @(0, 1)
+        if ($current.Lines.Count -gt 1 -or
+            ($current.Lines.Count -eq 1 -and $current.Lines[0] -cne $requested)) {
+            throw "$kind push remote configuration conflicts with the requested target; nothing was overwritten."
+        }
+        if ($Phase -eq 'Check') { continue }
+        $status = $State.PushRemotes[$kind]
+        if ($status -notin @('pending', 'configuring', 'written')) {
+            throw "$kind push remote journal is invalid; it will not be reset."
+        }
+        if ($Phase -eq 'Verify' -or $status -eq 'written') {
+            if ($current.Lines.Count -ne 1 -or $status -ne 'written') {
+                throw "$kind push remote configuration changed; it will not be restored automatically."
+            }
+            continue
+        }
+        if (-not $current.Lines.Count) {
+            if ($status -eq 'configuring') {
+                throw "Interrupted $kind push remote configuration needs inspection."
+            }
+            $State.PushRemotes[$kind] = 'configuring'
+            Write-WinpdJson $Plan.Paths.State $State
+            $null = Invoke-WinpdGit $Plan.Repository.Root @('config', '--local', '--add', $key, $requested)
+            $current = Invoke-WinpdGit $Plan.Repository.Root @('config', '--local', '--get-all', $key) @(0, 1)
+            if ($current.Lines.Count -ne 1 -or $current.Lines[0] -cne $requested) {
+                throw "$kind push remote configuration changed during setup."
+            }
+        }
+        $State.PushRemotes[$kind] = 'written'
+        Write-WinpdJson $Plan.Paths.State $State
+    }
+}
+
+function Expand-WinpdInstructionText {
+    param([AllowEmptyString()][string]$Text, [Collections.IDictionary]$Parameters)
+    $replace = {
+        param($match)
+        $reference = $match.Groups['reference'].Value.Trim()
+        $separator = $reference.IndexOf('.')
+        if ($separator -le 0 -or $separator -eq $reference.Length - 1) {
+            throw 'Invalid instruction placeholder; use Namespace.Parameter.'
+        }
+        $namespace = $reference.Substring(0, $separator)
+        $name = $reference.Substring($separator + 1)
+        if ($namespace -cnotin @('Common', 'Project', 'User')) {
+            throw "Unknown instruction namespace: $namespace"
+        }
+        $values = $Parameters[$namespace]
+        if ($values -isnot [Collections.IDictionary] -or -not $values.Contains($name)) {
+            throw "Unknown instruction parameter: ${namespace}.${name}"
+        }
+        $value = $values[$name]
+        if ($value -is [string]) { return $value }
+        if ($value -is [bool]) { return $value.ToString().ToLowerInvariant() }
+        if ($value -is [int] -or $value -is [long]) {
+            return $value.ToString([Globalization.CultureInfo]::InvariantCulture)
+        }
+        throw "Instruction parameter ${namespace}.${name} must have a scalar value."
+    }.GetNewClosure()
+    # One pass preserves literal placeholder text supplied as a parameter value.
+    return [regex]::Replace($Text,
+        '(?<!\$)\{\{(?<reference>[^{}]*)\}\}',
+        [Text.RegularExpressions.MatchEvaluator]$replace)
+}
+
 function Get-WinpdInstructionText {
     param([Collections.IDictionary]$Plan)
     $parts = [Collections.Generic.List[string]]::new()
@@ -78,7 +158,8 @@ function Get-WinpdInstructionText {
                 throw 'An instruction fragment changed after planning.'
             }
             $text = [IO.File]::ReadAllText($fragment.Path)
-            $text = $text.Replace('{{User.ChatLanguage}}', $Plan.Parameters.User.ChatLanguage)
+            $text = Expand-WinpdInstructionText $text $Plan.Parameters
+            Assert-WinpdNonSecretText $text 'rendered instructions'
             $parts.Add($text.TrimEnd())
         }
     }
@@ -108,6 +189,7 @@ function Invoke-WinpdSetup {
     foreach ($path in $Plan.Paths.Values) {
         $null = Resolve-WinpdChildPath (Split-Path $path -Parent) (Split-Path $path -Leaf)
     }
+    Invoke-WinpdPushRemoteSetup -Plan $Plan -Phase Check
     if (-not $PSCmdlet.ShouldProcess($Plan.Repository.Root, 'Prepare owned dev/publish worktrees and templates')) {
         return $Plan
     }
@@ -133,7 +215,9 @@ function Invoke-WinpdSetup {
                 throw 'Existing setup belongs to different inputs; no rebase, upgrade or overwrite was performed.'
             }
             if ($state['Resources'] -isnot [Collections.IDictionary] -or
-                $state['Files'] -isnot [Collections.IDictionary] -or $state['CompletedLayers'] -isnot [array]) {
+                $state['Files'] -isnot [Collections.IDictionary] -or
+                $state['PushRemotes'] -isnot [Collections.IDictionary] -or
+                $state['CompletedLayers'] -isnot [array]) {
                 throw 'The setup journal is incomplete; it will not be reset.'
             }
             $ownsState = $true
@@ -145,11 +229,13 @@ function Invoke-WinpdSetup {
             }
             Assert-WinpdOutputs $Plan $state -Complete:($state.Status -eq 'ready')
             if ($state.Status -eq 'ready') {
+                Invoke-WinpdPushRemoteSetup -Plan $Plan -Phase Verify -State $state
                 if ((Invoke-WinpdGit $Plan.Paths.Publish @('status', '--porcelain', '--untracked-files=all')).Lines.Count) {
                     throw 'The publish worktree has changed; setup will not overwrite it.'
                 }
                 return @{ Status = 'ready'; Reused = $true; DevRoot = $Plan.Paths.Dev
                     PublishRoot = $Plan.Paths.Publish; StatePath = $Plan.Paths.State
+                    DevRemote = $Plan.Parameters.Common.DevRemote; PublishRemote = $Plan.Parameters.Common.PublishRemote
                     BaseCommit = $Plan.Base.Commit; ToolkitCommit = $Plan.Toolkit.Head; PinSource = $Plan.PinSource }
             }
         } else {
@@ -157,6 +243,7 @@ function Invoke-WinpdSetup {
                 SchemaVersion = 1; TaskId = $Plan.TaskId; Fingerprint = $Plan.Fingerprint
                 Status = 'applying'; Phase = 'preflight'; Resources = @{ Dev = 'pending'; Publish = 'pending' }
                 Files = @{}; CompletedLayers = @(); OriginalAgents = $null; Error = $null
+                PushRemotes = @{ Dev = 'pending'; Publish = 'pending' }
                 Base = $Plan.Base; Toolkit = $Plan.Toolkit; Paths = $Plan.Paths; Branches = $Plan.Branches
             }
             $ownsState = $true
@@ -182,6 +269,7 @@ function Invoke-WinpdSetup {
             $state.Resources[$kind] = 'created'
             Write-WinpdJson $Plan.Paths.State $state
         }
+        Invoke-WinpdPushRemoteSetup -Plan $Plan -Phase Apply -State $state
         $managedRoot = Join-Path $Plan.Paths.Dev '.winpd'
         if (-not $state.Files.Count -and (Test-Path -LiteralPath $managedRoot)) {
             throw 'The base already contains a .winpd directory; setup will not adopt it.'
@@ -228,6 +316,7 @@ function Invoke-WinpdSetup {
         Write-WinpdJson $Plan.Paths.State $state
         foreach ($layer in $Plan.Layers) { $null = Invoke-WinpdLayer $layer 'Verify' $Plan }
         foreach ($kind in 'Dev', 'Publish') { Assert-WinpdWorktree $Plan $kind }
+        Invoke-WinpdPushRemoteSetup -Plan $Plan -Phase Verify -State $state
         Assert-WinpdOutputs $Plan $state -Complete
         if ((Invoke-WinpdGit $Plan.Paths.Publish @('status', '--porcelain', '--untracked-files=all')).Lines.Count -or
             (Test-Path -LiteralPath (Join-Path $Plan.Paths.Publish '.winpd'))) {
@@ -238,6 +327,7 @@ function Invoke-WinpdSetup {
         Write-WinpdJson $Plan.Paths.State $state
         return @{ Status = 'ready'; Reused = $false; DevRoot = $Plan.Paths.Dev
             PublishRoot = $Plan.Paths.Publish; StatePath = $Plan.Paths.State
+            DevRemote = $Plan.Parameters.Common.DevRemote; PublishRemote = $Plan.Parameters.Common.PublishRemote
             BaseCommit = $Plan.Base.Commit; ToolkitCommit = $Plan.Toolkit.Head; PinSource = $Plan.PinSource }
     }
     catch {

@@ -157,8 +157,8 @@ function Get-RunnableWtaPath {
 function Resolve-WtComClsid {
     <#
     .SYNOPSIS
-        Find the live COM CLSID for the running WT of this package by probing each
-        per-brand CLSID until wtcli connects. Caches the result on the app object.
+        Resolve the running package's known brand or explicitly selected COM CLSID.
+        Caches the result on the app object; unknown families require an override.
     .NOTES
         WT registers the server with CoRegisterClassObject(CLSCTX_LOCAL_SERVER), so the
         terminal MUST already be running. Returns the CLSID string, or throws.
@@ -166,9 +166,27 @@ function Resolve-WtComClsid {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$App,
-        [int]$TimeoutSec = 30
+        [int]$TimeoutSec = 30,
+        [string]$ComClsid = $env:ITE2E_WT_COM_CLSID
     )
-    if ($App.ComClsid) { return $App.ComClsid }
+    $override = $null
+    if ($ComClsid) {
+        $parsed = [guid]::Empty
+        if (-not [guid]::TryParse($ComClsid, [ref]$parsed) -or $parsed -eq [guid]::Empty) {
+            throw 'The COM override must be a non-empty GUID.'
+        }
+        $override = $parsed.ToString('B')
+    }
+    if ($App.ComClsid) {
+        if ($override) {
+            $cached = [guid]::Empty
+            if (-not [guid]::TryParse($App.ComClsid, [ref]$cached) -or $cached -ne $parsed) {
+                throw 'The COM override conflicts with the cached application identity.'
+            }
+            $App.ComClsid = $override
+        }
+        return $App.ComClsid
+    }
     $wtcli = $App.WtcliPath
     if (-not $wtcli) { throw "wtcli not resolved for $($App.Package)." }
 
@@ -176,14 +194,17 @@ function Resolve-WtComClsid {
     # are installed they share the COM activation namespace, so blindly taking the first
     # responding brand can cold-launch the OTHER package's window-less server and latch onto the
     # wrong CLSID (→ later GetActivePane 0x80004005). For a KNOWN package family we therefore
-    # probe ONLY its brand (the Wait-Until retry absorbs startup); an unknown/custom family falls
-    # back to scanning every brand.
+    # probe ONLY its brand (the Wait-Until retry absorbs startup). Unknown families need an
+    # explicit endpoint rather than probing a server belonging to another package.
     $expectedBrand = $script:ItFamilyBrand[$App.Package]
-    $probeOrder = if ($expectedBrand) { @($expectedBrand) } else { @($script:ItBrandClsids.Keys) }
+    if (-not $override -and -not $expectedBrand) {
+        throw "Package '$($App.Package)' requires an explicit COM override; no other brand will be probed."
+    }
+    $probeOrder = if ($override) { @('override') } else { @($expectedBrand) }
 
     $found = Wait-Until -TimeoutSec $TimeoutSec -IntervalSec 1 -Because "a brand CLSID that wtcli can connect to" -Quiet -Condition {
         foreach ($brand in $probeOrder) {
-            $clsid = $script:ItBrandClsids[$brand]
+            $clsid = if ($override) { $override } else { $script:ItBrandClsids[$brand] }
             $r = Invoke-Native -FilePath $wtcli -Arguments @('--json', 'list-windows') -TimeoutSec 8 -Environment @{ WT_COM_CLSID = $clsid }
             if ($r.ExitCode -eq 0) {
                 $j = $r.StdOut | ConvertFrom-JsonSafe

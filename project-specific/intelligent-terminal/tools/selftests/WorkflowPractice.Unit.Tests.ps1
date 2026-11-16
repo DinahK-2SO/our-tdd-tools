@@ -49,16 +49,18 @@ Describe 'TDD practice and test admission contract' -Tag 'Unit' {
     }
 
     It 'keeps PR descriptions focused on product changes rather than internal progress' {
-        $script:workflow | Should -Match 'Write PR descriptions in concise English'
+        $script:workflow | Should -Match 'selected user profile'
         $script:workflow | Should -Match 'what changes and how it works'
         $script:workflow | Should -Match 'Internal progress, unfinished-work notes, cost or authorization decisions'
         $script:workflow | Should -Match 'actual commands and results'
+        $script:workflow | Should -Not -Match 'title is at most \d+ words'
     }
 
-    It 'does not add a per-description approval gate to an existing PR delivery task' {
+    It 'uses selected review preferences without granting public-write authority' {
         $script:workflow | Should -Match 'Within an already requested PR-delivery task'
-        $script:workflow | Should -Match 'Do not wait for per-description wording approval or confirmation'
+        $script:workflow | Should -Match 'explicit approval requirements'
         $script:workflow | Should -Match 'Preserve teammate edits'
-        $script:readme | Should -Match 'without a separate wording-approval gate'
+        $script:workflow | Should -Not -Match 'The only permitted review comment is'
+        $script:readme | Should -Match 'selected user profile'
     }
 }

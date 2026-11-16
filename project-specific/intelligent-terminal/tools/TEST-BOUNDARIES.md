@@ -230,8 +230,9 @@ poll, re-read its final head/state before any follow-up. Merge/closure stops onl
 the task's watcher; it does not release a manual app or authorize cleanup.
 
 Review completeness is established by exact-head findings/annotation triage and
-code evidence, not shared-account reply counts. Keep reviewer-owned threads open;
-do not post routine acknowledgements, self-approve or merge to satisfy tooling.
+code evidence, not shared-account reply counts. Follow the selected review policy
+and explicit authorization; never manufacture replies, approvals or thread-state
+changes merely to satisfy tooling.
 
 Review snapshots include complete fetched bodies and actual check annotations,
 even for successful checks. Incomplete review/thread/check pagination and failed

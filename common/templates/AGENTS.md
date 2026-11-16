@@ -56,6 +56,12 @@ outgoing text. Review full current-head findings and annotations, not only a
 headline or reply count. Do not claim a watcher is active unless it was started
 and its lifecycle is recorded.
 
+Use the repository's PR template and selected user profile for public language,
+length limits and review interaction preferences. Keep actual validation results
+and preserve other authors' work. A personal preference does not authorize public
+writes, thread resolution or merging. Confirm each branch's push target before
+publishing; the source `BaseRemote` is not its push destination.
+
 ## Online PR review monitoring
 
 This common workflow applies to every project's authorized PR-delivery task.

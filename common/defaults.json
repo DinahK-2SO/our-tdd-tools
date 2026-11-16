@@ -3,6 +3,8 @@
   "Keyword": "task",
   "BaseRemote": "",
   "BaseBranch": "",
+  "DevRemote": "",
+  "PublishRemote": "",
   "BranchPrefix": "winpd",
   "WorktreeRoot": "",
   "ProjectId": "auto",

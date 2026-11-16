@@ -1,4 +1,4 @@
-# winpd-tdd
+# our-tdd-tools
 
 A layered setup toolkit for deterministic TDD workspace preparation, initially
 extracted from the workflows developed alongside Intelligent Terminal.
@@ -15,13 +15,15 @@ upstream and its HEAD must equal that upstream's advertised HEAD. Update the
 toolkit separately before invoking setup; setup never pulls or rewrites itself.
 The product repository needs a commit and an accessible base remote.
 
-Run from the product directory, not from the toolkit:
+Run from the product directory, not from the toolkit. Replace `<...>` path
+placeholders below with your own locations; they are documentation placeholders,
+not default paths stored by setup:
 
 ```powershell
-Set-Location 'C:\ado\intelligent-terminal'
+Set-Location '<PROJECT_ROOT>'
 
 # Prepare the worktrees and leave the feature contract unfilled.
-& 'C:\ado\winpd-tdd\setup.ps1' -Common @{ Keyword = 'navigation' }
+& '<TOOLKIT_ROOT>\setup.ps1' -Common @{ Keyword = 'navigation' }
 ```
 
 With the defaults, this creates:
@@ -30,8 +32,8 @@ With the defaults, this creates:
 | --- | --- |
 | Dev branch | `winpd/navigation-dev` |
 | Publish branch | `winpd/navigation-publish` |
-| Dev worktree | `C:\ado\intelligent-terminal-navigation-dev` |
-| Publish worktree | `C:\ado\intelligent-terminal-navigation-publish` |
+| Dev worktree | `<WORKTREE_PARENT>\<PROJECT_NAME>-navigation-dev` |
+| Publish worktree | `<WORKTREE_PARENT>\<PROJECT_NAME>-navigation-publish` |
 | Generated contract | `AGENTS.md` in dev |
 | Toolbox and provenance | `.winpd\` in dev |
 
@@ -55,7 +57,7 @@ The three dictionaries are validated separately; unknown keys and wrong types
 fail before setup. All parameters have defaults. For example:
 
 ```powershell
-& 'C:\ado\winpd-tdd\setup.ps1' `
+& '<TOOLKIT_ROOT>\setup.ps1' `
     -Common @{ Keyword = 'navigation'; BaseRemote = 'upstream' } `
     -Project @{ IncludeTools = $true } `
     -User @{ ChatLanguage = 'zh-CN' }
@@ -71,6 +73,8 @@ parameter, not a Common or User parameter.
 | `Keyword` | `task`; supply a different keyword for each new task |
 | `BaseRemote` | `origin`, otherwise the single unambiguous remote |
 | `BaseBranch` | Project/user default, otherwise the selected remote's default branch |
+| `DevRemote` | Empty; do not configure a dev push target unless explicitly supplied |
+| `PublishRemote` | Empty; do not configure a publish push target unless explicitly supplied |
 | `BranchPrefix` | `winpd` |
 | `WorktreeRoot` | Parent of the caller repository; explicit relative paths are repository-relative |
 | `ProjectId` | `auto`; `common` explicitly disables project customization |
@@ -82,15 +86,49 @@ underscores and hyphens, beginning with a letter or digit. Git validates branch
 names too. Output paths may not overlap the caller or toolkit repository;
 junctions and other reparse points are not supported in managed paths.
 
-Terminal Project defaults are `IncludeTools = $true` and
-`PackageSelector = 'Dev'`. Setup does not build, deploy or launch that package.
-The selector is a preparation constraint, not proof of a later live-test target.
-Built-in User defaults are `ChatLanguage = 'en'` and no `ProfilePath`.
+Terminal Project defaults are `IncludeTools = $true`, `PackageSelector = 'Dev'`,
+and empty `ComClsid` / `CopilotConfigPath` overrides. The selector may instead be
+an exact package family name for an isolated deployment; `Auto` is not accepted.
+An explicit COM override must be a non-empty GUID, and a configuration path
+override must be absolute. Unknown real targets are not replaced with mock values.
+Setup only records these values in the contract: it does not query installed
+packages, build, deploy, launch or read the selected configuration file.
+
+The generated project contract explains the runtime bindings: `ITE2E_PACKAGE`,
+`ITE2E_WT_COM_CLSID` and `ITE2E_COPILOT_CONFIG`. The relevant helpers also accept
+explicit `-ComClsid` and `-ConfigPath` arguments. An unavailable explicit COM target
+does not fall back to another brand. A package outside the known brand mappings
+requires an explicit COM override before live checks; missing identity is an
+error, not permission to probe unrelated packages. Leave optional overrides unset
+for standard project identities and current-user path resolution.
+Built-in User defaults remain `ChatLanguage = 'en'` and no `ProfilePath`.
+
+### Independent push destinations
+
+`BaseRemote` selects source history, not where either branch should be pushed.
+To bind different push destinations, use names of remotes already configured in
+the product repository:
+
+```powershell
+& '<TOOLKIT_ROOT>\setup.ps1' -Common @{
+    Keyword = 'navigation'
+    DevRemote = '<DEV_REMOTE_NAME>'
+    PublishRemote = '<PUBLISH_REMOTE_NAME>'
+}
+```
+
+Setup writes only the owned branches' local `branch.<name>.pushRemote` settings;
+it never creates remotes, changes the caller branch's target or executes a push.
+Unknown remote names and conflicting existing settings fail. Once a target has
+been configured, reruns do not overwrite or restore a user-edited setting.
+An empty value leaves the corresponding Git configuration unchanged, so resolve
+that destination explicitly before publishing. The first authorized push may
+still need `git push -u <REMOTE_NAME> <BRANCH_NAME>` to establish tracking.
 
 Offline example, after the needed remote-tracking refs have already been fetched:
 
 ```powershell
-& 'C:\ado\winpd-tdd\setup.ps1' -Common @{
+& '<TOOLKIT_ROOT>\setup.ps1' -Common @{
     Keyword = 'offline-task'
     Offline = $true
     BaseBranch = 'main'
@@ -116,10 +154,10 @@ nonsecret files in `user-specific\examples` to a private directory and adapt
 `profile.json`. Select it explicitly:
 
 ```powershell
-& 'C:\ado\winpd-tdd\setup.ps1' `
+& '<TOOLKIT_ROOT>\setup.ps1' `
     -Common @{ Keyword = 'personal-task' } `
     -User @{
-        ProfilePath = 'C:\ado\my-winpd-profile'
+        ProfilePath = '<PRIVATE_PROFILE_DIRECTORY>'
         ChatLanguage = 'zh-CN'
         ExtraCheckLabel = 'local-style'
     }
@@ -138,10 +176,51 @@ and token checks are defense in depth, not an exhaustive secret detector.
 Plans can contain private paths and parameter values; keep them local.
 
 Project and private-user `commonDefaults` may supply only `Keyword`, `BaseRemote`,
-`BaseBranch`, `BranchPrefix` and `WorktreeRoot`. Precedence is common defaults,
+`BaseBranch`, `DevRemote`, `PublishRemote`, `BranchPrefix` and `WorktreeRoot`. Precedence is common defaults,
 project defaults, user defaults, then explicit Common arguments. These defaults
 cannot redirect `WorkingDirectory`, `ProjectId` or `Offline`. Custom User schemas
 cannot redefine built-in User parameter definitions.
+
+A private profile may also declare `projectDefaults`, keyed by project ID:
+
+```json
+{
+  "schemaVersion": 1,
+  "projectDefaults": {
+    "intelligent-terminal": { "PackageSelector": "Dev" }
+  }
+}
+```
+
+Only the selected project's entry is merged and validated against that project's
+schema. Explicit `-Project` arguments override those private defaults; values for
+another project do not enter the current namespace. This can supply local runtime
+bindings without hard-coding them in shared source.
+
+### Template fields and private preferences
+
+Instruction fragments can reference declared scalar parameters using
+`{{Common.Keyword}}`, `{{Project.PackageSelector}}` or `{{User.ExtraCheckLabel}}`.
+Strings, integers and Booleans are expanded mechanically in one pass. Unknown
+namespaces/parameters and non-scalar values fail before worktree creation.
+Inserted values are not evaluated as expressions or recursively expanded.
+Other `{{...}}` forms are rejected rather than evaluated.
+Semantic placeholders such as `<FEATURE_GOAL>` remain unfilled, as do GitHub
+Actions `${{ ... }}` expressions.
+
+Add private writing/review preferences through a local profile's own schema,
+defaults and instruction fragments. Shared templates follow the repository's
+requirements and explicitly selected preferences rather than imposing a
+maintainer's language, word limits or reply policy. Keep specific defaults in
+an external profile directory or a local-only worktree's `user-specific\local`
+directory, not in the shared branch. Selecting a private profile does not make
+its generated dev contract safe to publish.
+
+Secrets are not template values or ordinary setup parameters. Secret-labelled
+fields and known credential markers are rejected; this is defense in depth, not
+an exhaustive secret scanner. Credentials remain in the provider's credential
+store. Git authorship and existing commit trailers are separate metadata and
+are not rewritten by parameterization.
 
 ### Hook contract
 

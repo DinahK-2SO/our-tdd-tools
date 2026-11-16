@@ -58,6 +58,80 @@ Describe 'Project and private user profiles' -Tag 'Unit' {
         $publicManifest | Should -Not -Match ([regex]::Escape($script:userRoot))
     }
 
+    It 'expands parameterized instructions once while preserving semantic placeholders' {
+        'Common={{Common.Keyword}}; Offline={{Common.Offline}}; Project={{Project.Marker}}' |
+            Set-Content -LiteralPath (Join-Path $script:toolkit 'common\templates\AGENTS.md')
+        $null = Invoke-TestGit $script:toolkit @('add', '--all')
+        $null = Invoke-TestGit $script:toolkit @('commit', '--quiet', '-m', 'Parameterized instruction fixture')
+        $script:profile.defaults.WordLimit = 17
+        $script:profile.schema.properties.WordLimit = @{ type = 'integer'; minimum = 1 }
+        Write-TestJson (Join-Path $script:userRoot 'profile.json') $script:profile
+        'User={{User.Marker}}; Limit={{User.WordLimit}}; Language={{User.ChatLanguage}}; <FEATURE_GOAL>; ${{ github.sha }}' |
+            Set-Content -LiteralPath (Join-Path $script:userRoot 'AGENTS.md')
+        $plan = New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -Project @{ Marker = 'project-value' } `
+            -User @{ ProfilePath = $script:userRoot; Marker = '$1 {{User.ChatLanguage}}'; ChatLanguage = 'de'; WordLimit = 23 }
+
+        $null = Invoke-WinpdSetup -Plan $plan
+
+        $text = Get-Content -LiteralPath (Join-Path $plan.Paths.Dev 'AGENTS.md') -Raw
+        $text | Should -Match 'Common=profiles; Offline=true; Project=project-value'
+        $text | Should -Match ([regex]::Escape('User=$1 {{User.ChatLanguage}}; Limit=23; Language=de; <FEATURE_GOAL>'))
+        $text | Should -Match ([regex]::Escape('${{ github.sha }}'))
+        (Invoke-TestGit $plan.Paths.Publish @('status', '--porcelain')).Count | Should -Be 0
+    }
+
+    It 'rejects unknown and non-scalar parameterized instructions before creating resources' {
+        $path = Join-Path $script:userRoot 'AGENTS.md'
+        '{{User.Missing}}' | Set-Content -LiteralPath $path
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot } } | Should -Throw '*Unknown instruction parameter*'
+        '{{Other.Marker}}' | Set-Content -LiteralPath $path
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot } } | Should -Throw '*Unknown instruction namespace*'
+        '{{User.No-Such-Key}}' | Set-Content -LiteralPath $path
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot } } | Should -Throw '*Unknown instruction parameter*'
+        '{{User}}' | Set-Content -LiteralPath $path
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot } } | Should -Throw '*Invalid instruction placeholder*'
+        $script:profile.defaults.Options = @{}
+        $script:profile.schema.properties.Options = @{ type = 'object' }
+        Write-TestJson (Join-Path $script:userRoot 'profile.json') $script:profile
+        '{{User.Options}}' | Set-Content -LiteralPath $path
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot } } | Should -Throw '*scalar*'
+        @(Invoke-TestGit $script:repo @('branch', '--list', 'personal/*')).Count | Should -Be 0
+    }
+
+    It 'rejects credential-shaped parameterized values without requiring a secret label' {
+        $syntheticCredential = 'gh' + 'p_' + ('A' * 36)
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot; Marker = $syntheticCredential } } |
+            Should -Throw '*Private credential material*'
+        @(Invoke-TestGit $script:repo @('branch', '--list', 'personal/*')).Count | Should -Be 0
+    }
+
+    It 'applies parameterized project defaults only to the selected project and honors explicit overrides' {
+        $script:profile.projectDefaults = @{
+            'intelligent-terminal' = @{ Marker = 'private-project-default' }
+            'another-project' = @{ DifferentParameter = 'not-for-this-project' }
+        }
+        Write-TestJson (Join-Path $script:userRoot 'profile.json') $script:profile
+
+        $plan = New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot }
+        $plan.Parameters.Project.Marker | Should -Be 'private-project-default'
+        $plan.Parameters.User.Marker | Should -Be 'user-marker'
+        $explicit = New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -Project @{ Marker = 'explicit-project-value' } -User @{ ProfilePath = $script:userRoot }
+        $explicit.Parameters.Project.Marker | Should -Be 'explicit-project-value'
+        $script:profile.projectDefaults['intelligent-terminal'].Unknown = 'invalid'
+        Write-TestJson (Join-Path $script:userRoot 'profile.json') $script:profile
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common `
+            -User @{ ProfilePath = $script:userRoot } } | Should -Throw '*Unknown Project parameter*'
+    }
+
     It 'runs a user prerequisite before common worktree creation' {
         $script:profile.setupScript = 'setup.ps1'
         Write-TestJson (Join-Path $script:userRoot 'profile.json') $script:profile
@@ -120,6 +194,30 @@ if ($Phase -eq 'Plan') { return @{ Instructions = @(); ToolDirectories = @() } }
 }
 
 Describe 'Shipped project boundaries' -Tag 'Unit' {
+    It 'renders parameterized runtime targets without querying or launching an installed package' {
+        $toolkit = New-TestToolkitSnapshot $TestDrive $script:sourceRoot
+        $repo = New-TestRepository $TestDrive 'intelligent-terminal'
+        $null = Add-TestRemote $repo $TestDrive
+        $configPath = Join-Path $TestDrive 'isolated profile\config.json'
+        $plan = New-WinpdSetupPlan -ToolkitRoot $toolkit `
+            -Common @{ WorkingDirectory = $repo; Keyword = 'isolated'; Offline = $true } `
+            -Project @{
+                IncludeTools = $false
+                PackageSelector = 'ExampleTerminal_0123456789abc'
+                ComClsid = '{11111111-2222-4333-8444-555555555555}'
+                CopilotConfigPath = $configPath
+            }
+
+        $null = Invoke-WinpdSetup -Plan $plan
+
+        $agents = Get-Content -LiteralPath (Join-Path $plan.Paths.Dev 'AGENTS.md') -Raw
+        $agents | Should -Match 'ExampleTerminal_0123456789abc'
+        $agents | Should -Match ([regex]::Escape('{11111111-2222-4333-8444-555555555555}'))
+        $agents | Should -Match ([regex]::Escape($configPath))
+        $agents | Should -Match '<FEATURE_GOAL>'
+        Test-Path -LiteralPath $configPath | Should -BeFalse
+    }
+
     It 'installs the common recurring PR prompt for <RepositoryName> without project tools' -TestCases @(
         @{ RepositoryName = 'unrelated-project'; ProjectParameters = @{} }
         @{ RepositoryName = 'intelligent-terminal'; ProjectParameters = @{ IncludeTools = $false } }

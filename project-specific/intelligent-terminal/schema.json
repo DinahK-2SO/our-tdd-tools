@@ -3,6 +3,8 @@
   "additionalProperties": false,
   "properties": {
     "IncludeTools": { "type": "boolean" },
-    "PackageSelector": { "type": "string", "enum": ["Dev"] }
+    "PackageSelector": { "type": "string", "pattern": "^(?i:Dev|[A-Za-z0-9][A-Za-z0-9.-]*_[a-z0-9]{13})$" },
+    "ComClsid": { "type": "string" },
+    "CopilotConfigPath": { "type": "string", "pattern": "^[^\\r\\n]*$" }
   }
 }

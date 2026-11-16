@@ -5,8 +5,9 @@ current product architecture, build commands, settings and compatibility rules.
 
 ## Project tooling
 
-The dev-only Terminal toolkit is under
-`.winpd\project-specific\intelligent-terminal\tools`. It contains the retained
+Project tools included: `{{Project.IncludeTools}}`. When enabled, the dev-only
+Terminal toolkit is under `.winpd\project-specific\intelligent-terminal\tools`.
+It contains the retained
 ItE2E helpers, deterministic fixtures, build/deployment identity checks and
 Terminal-specific real-provider scenarios.
 
@@ -15,6 +16,19 @@ In this generated workspace, use the toolbox path above instead. Do not copy
 these tools into publish to satisfy test dependencies.
 
 ## Product validation
+
+- Prepared package selector: `{{Project.PackageSelector}}`.
+- Optional COM endpoint override (blank means project defaults): {{Project.ComClsid}}
+- Optional Copilot hook configuration path (blank means the current-user path): {{Project.CopilotConfigPath}}
+
+For an authorized live check, set `ITE2E_PACKAGE` to the prepared selector.
+If overrides are supplied, set `ITE2E_WT_COM_CLSID` and `ITE2E_COPILOT_CONFIG`
+to those values for that check. Otherwise leave those overrides unset so the
+project's standard identities and current-user path are resolved normally.
+A package with no known brand mapping requires an explicit COM override before
+live checks. Never use an invented identifier or silently switch targets when
+resolution fails.
+These prepared values do not authorize deployment, hook changes or live execution.
 
 - For unshipped changes, validate the intended publish revision through a freshly
   built Dev package. Explicitly pin the package selector; an installed package is

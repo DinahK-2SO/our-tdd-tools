@@ -75,6 +75,9 @@ automatically distributed as common instructions to every product.
   publish suffixes. Validate Git names and filesystem boundaries before writing.
 - Resolve the base remote/branch explicitly. Prefer the selected remote's declared
   default branch when no branch is supplied; do not assume every project uses main.
+- Optional `DevRemote` and `PublishRemote` parameters bind only the owned branches'
+  push targets. They do not change the base source, add remotes or execute a push;
+  conflicting or subsequently edited settings must be preserved.
 - Pin the product base and toolkit HEAD for the whole run. With an upstream
   configured, check that the running toolkit is current before applying; stale or
   dirty toolkit source must not silently masquerade as the latest version.
@@ -85,6 +88,8 @@ automatically distributed as common instructions to every product.
   can use the explicitly reported common-only profile.
 - A local user profile is optional. Shared examples contain no credentials.
   Personal source files and runtime state are never copied wholesale.
+- Private `projectDefaults` are keyed by project ID and validated in that project's
+  namespace; explicit Project arguments take precedence.
 - Setup performs no implicit product push, application shutdown, installation,
   deployment, credential change, or real model request.
 

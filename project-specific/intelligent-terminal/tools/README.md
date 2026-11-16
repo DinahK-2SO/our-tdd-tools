@@ -290,12 +290,12 @@ comparison can still treat different Unicode representations as equal.
   severity label does not authorize a lifecycle redesign. Fix introduced defects; agree scope
   before larger work, and preserve valid out-of-scope findings in a separate tracker. A reply
   or green check is not proof that the underlying risk is fixed.
-- Follow the root template's PR-description style: concise English what/how and actual
-  validation evidence, without internal progress, budget or coordination notes. Within an
-  existing PR-delivery task, generate and maintain the agent-authored description
-  without a separate wording-approval gate; preserve teammate edits and explicit user pauses.
-- Short, courteous won't-fix replies linking a real follow-up issue can keep reviewers focused.
-  Edit only your own replies and preserve thread state; keep detailed reasoning in local evidence.
+- Follow the repository PR template and selected user profile for language, length
+  limits and review interaction preferences. Explain what/how and actual validation
+  without internal progress, budget or coordination notes. Follow explicit approval
+  requirements, preserve teammate edits and honor discussion pauses.
+- Keep detailed reasoning local. Public replies, thread-state changes and merges
+  require their own authorization; an automated check does not grant it.
 - Audit release-report attribution, not just checkboxes or command exit codes. A short title
   can match an unrelated test name. Preserve raw output and flag unearned coverage separately;
   do not alter test results or silently patch an unrelated reporter to make the report green.

@@ -84,6 +84,13 @@ function Resolve-WinpdParameters {
             default { throw "Unsupported schema type for ${Namespace}.${key}." }
         }
         if (-not $validType) { throw "${Namespace}.${key} must have type $($rule.type)." }
+        if ($rule['sensitive'] -eq $true -or $rule['format'] -eq 'secret') {
+            throw 'Credentials are not setup parameters; keep them in the provider credential store.'
+        }
+        $text = if ($value -is [string]) { $value } else {
+            ConvertTo-Json -InputObject $value -Depth 64 -Compress -WarningAction Stop
+        }
+        Assert-WinpdNonSecretText $text "parameter ${Namespace}.${key}"
         if ($rule.Contains('enum') -and $value -notin $rule.enum) { throw "Invalid ${Namespace}.${key} value." }
         if ($rule.Contains('pattern') -and $value -cnotmatch $rule.pattern) { throw "Invalid ${Namespace}.${key} format." }
         if ($rule.Contains('minLength') -and $value.Length -lt $rule.minLength) { throw "${Namespace}.${key} is too short." }
@@ -278,6 +285,9 @@ function New-WinpdSetupPlan {
             $remote = Get-WinpdRemoteName $repository $commonParameters.BaseRemote
         }
     }
+    if ($userProfile -and $userProfile.Data.projectDefaults.Contains($profile.Id)) {
+        $projectDefaults = Merge-WinpdValues $projectDefaults $userProfile.Data.projectDefaults[$profile.Id]
+    }
     $projectParameters = Resolve-WinpdParameters 'Project' $projectSchema $projectDefaults $Project
     $parameters = [ordered]@{ Common = $commonParameters; Project = $projectParameters; User = $userParameters }
     $toolkit = Get-WinpdToolkit $ToolkitRoot $true
@@ -338,6 +348,8 @@ function New-WinpdSetupPlan {
         Branches = $branches; Paths = $paths
     }
     $plan.Layers = @(Get-WinpdContributions $layers $plan)
+    $null = Get-WinpdInstructionText $plan
+    Invoke-WinpdPushRemoteSetup -Plan $plan -Phase Check
     # Pin provenance is observational, not a change to an existing task's identity.
     $plan.Fingerprint = Get-WinpdHash $plan
     $plan.PinSource = $(if ($recorded) { 'existing-task' } else { 'new-resolution' })

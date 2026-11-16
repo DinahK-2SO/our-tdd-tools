@@ -60,6 +60,63 @@ Describe 'Owned layered setup application' -Tag 'Unit' {
         ((Invoke-TestGit $script:repo @('worktree', 'list', '--porcelain')) -join "`n") | Should -Be $worktrees
     }
 
+    It 'configures independent parameterized push remotes without pushing or changing the base remote' {
+        $producer = New-TestRepository $TestDrive 'development-target'
+        $developmentRemote = Add-TestRemote $producer $TestDrive
+        $null = Invoke-TestGit $script:repo @('remote', 'add', 'development', $developmentRemote)
+        $null = Invoke-TestGit $script:repo @('remote', 'add', 'publication', $script:remote)
+        $before = (Invoke-TestGit $script:repo @('ls-remote', '--refs', 'development')) -join "`n"
+        $script:common.DevRemote = 'development'
+        $script:common.PublishRemote = 'publication'
+        $plan = New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common
+
+        $null = Invoke-WinpdSetup -Plan $plan
+
+        $plan.Base.Remote | Should -Be 'origin'
+        ((Invoke-TestGit $script:repo @('config', '--local', '--get', "branch.$($plan.Branches.Dev).pushRemote")) -join '') |
+            Should -Be 'development'
+        ((Invoke-TestGit $script:repo @('config', '--local', '--get', "branch.$($plan.Branches.Publish).pushRemote")) -join '') |
+            Should -Be 'publication'
+        ((Invoke-TestGit $script:repo @('config', '--get', 'branch.main.remote')) -join '') | Should -Be 'origin'
+        ((Invoke-TestGit $script:repo @('ls-remote', '--refs', 'development')) -join "`n") | Should -Be $before
+        (Invoke-WinpdSetup -Plan $plan).Reused | Should -BeTrue
+    }
+
+    It 'rejects an unknown parameterized push remote before creating resources' {
+        $script:common.DevRemote = 'not-configured'
+
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common } |
+            Should -Throw '*Unknown DevRemote*'
+
+        @(Invoke-TestGit $script:repo @('branch', '--list', 'winpd/setup-*')).Count | Should -Be 0
+    }
+
+    It 'preserves conflicting existing parameterized branch configuration' {
+        $script:common.DevRemote = 'origin'
+        $key = 'branch.winpd/setup-dev.pushRemote'
+        $null = Invoke-TestGit $script:repo @('config', '--local', $key, 'another-target')
+
+        { New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common } |
+            Should -Throw '*push remote*conflict*'
+
+        ((Invoke-TestGit $script:repo @('config', '--local', '--get', $key)) -join '') | Should -Be 'another-target'
+        @(Invoke-TestGit $script:repo @('branch', '--list', 'winpd/setup-*')).Count | Should -Be 0
+    }
+
+    It 'does not restore a user-removed parameterized push remote even after a failed rerun' {
+        $script:common.DevRemote = 'origin'
+        $plan = New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common
+        $null = Invoke-WinpdSetup -Plan $plan
+        $key = "branch.$($plan.Branches.Dev).pushRemote"
+        $null = Invoke-TestGit $script:repo @('config', '--local', '--unset', $key)
+
+        { Invoke-WinpdSetup -Plan $plan } | Should -Throw '*push remote*changed*'
+        { Invoke-WinpdSetup -Plan $plan } | Should -Throw '*push remote*changed*'
+
+        $null = & git -C $script:repo config --local --get $key
+        $LASTEXITCODE | Should -Be 1
+    }
+
     It 'refuses a collision before creating the other worktree or a state journal' {
         $plan = New-WinpdSetupPlan -ToolkitRoot $script:toolkit -Common $script:common
         New-Item -ItemType Directory -Path $plan.Paths.Dev | Out-Null

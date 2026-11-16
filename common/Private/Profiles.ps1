@@ -15,13 +15,19 @@ function Read-WinpdUserProfile {
     $resolved = Resolve-WinpdChildPath $root ([IO.Path]::GetFileName($resolved))
     $data = Read-WinpdJson $resolved
     if ($data['schemaVersion'] -ne 1) { throw 'Unsupported local user profile version.' }
-    $allowed = @('schemaVersion', 'commonDefaults', 'defaults', 'schema', 'instructions', 'tools', 'setupScript')
+    $allowed = @('schemaVersion', 'commonDefaults', 'projectDefaults', 'defaults', 'schema', 'instructions', 'tools', 'setupScript')
     foreach ($key in $data.Keys) {
         if ($key -notin $allowed) { throw "Unknown local user profile field: $key" }
     }
-    foreach ($key in 'commonDefaults', 'defaults') {
+    foreach ($key in 'commonDefaults', 'projectDefaults', 'defaults') {
         if (-not $data.Contains($key)) { $data[$key] = @{} }
         if ($data[$key] -isnot [Collections.IDictionary]) { throw "User profile $key must be an object." }
+    }
+    foreach ($projectId in $data.projectDefaults.Keys) {
+        if ($projectId -cnotmatch '^[a-z0-9][a-z0-9-]*$' -or
+            $data.projectDefaults[$projectId] -isnot [Collections.IDictionary]) {
+            throw 'User profile projectDefaults must map project IDs to parameter objects.'
+        }
     }
     foreach ($key in 'instructions', 'tools') {
         if (-not $data.Contains($key)) { $data[$key] = @() }
@@ -67,11 +73,18 @@ function Merge-WinpdUserSchema {
 
 function Get-WinpdCommonDefaults {
     param([Collections.IDictionary]$Defaults, [Collections.IDictionary]$Contribution)
-    $allowed = @('Keyword', 'BaseRemote', 'BaseBranch', 'BranchPrefix', 'WorktreeRoot')
+    $allowed = @('Keyword', 'BaseRemote', 'BaseBranch', 'DevRemote', 'PublishRemote', 'BranchPrefix', 'WorktreeRoot')
     foreach ($key in $Contribution.Keys) {
         if ($key -notin $allowed) { throw "Unsupported cross-layer Common default: $key" }
     }
     return Merge-WinpdValues $Defaults $Contribution
+}
+
+function Assert-WinpdNonSecretText {
+    param([AllowEmptyString()][string]$Text, [string]$Source)
+    if ($Text -match '-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}') {
+        throw "Private credential material was found in $Source."
+    }
 }
 
 function Assert-WinpdUserAsset {
@@ -81,9 +94,7 @@ function Assert-WinpdUserAsset {
         throw "Private runtime data cannot be materialized: $name"
     }
     $text = [IO.File]::ReadAllText($Path)
-    if ($text -match '-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}') {
-        throw "Private credential material was found in a declared user asset: $name"
-    }
+    Assert-WinpdNonSecretText $text "declared user asset $name"
 }
 
 function Assert-WinpdLayerInputs {

@@ -137,6 +137,152 @@ Describe 'AI oracle safety' -Tag 'Unit' {
     }
 }
 
+Describe 'Parameterized runtime COM target' -Tag 'Unit' {
+    It 'requires an explicit endpoint for an unknown package instead of accepting another brand' {
+        InModuleScope ItE2E {
+            $app = [pscustomobject]@{
+                Package = 'ExampleTerminal_0123456789abc'
+                WtcliPath = 'fixture-wtcli.exe'
+                ComClsid = $null
+            }
+            Mock Wait-Until { & $Condition }
+            Mock Invoke-Native { [pscustomobject]@{ ExitCode = 0; StdOut = '{"windows":[{"id":7}]}' } }
+            Mock Write-ItLog
+            $previous = $env:ITE2E_WT_COM_CLSID
+            try {
+                Remove-Item Env:ITE2E_WT_COM_CLSID -ErrorAction SilentlyContinue
+                { Resolve-WtComClsid -App $app } | Should -Throw '*requires an explicit COM override*'
+                Should -Invoke Invoke-Native -Times 0 -Exactly
+            }
+            finally {
+                $env:ITE2E_WT_COM_CLSID = $previous
+            }
+        }
+    }
+
+    It 'preserves the positional timeout and default endpoint for a known package' {
+        InModuleScope ItE2E {
+            $app = [pscustomobject]@{
+                Package = $script:ItKnownFamilies.Dev
+                WtcliPath = 'fixture-wtcli.exe'
+                ComClsid = $null
+            }
+            Mock Wait-Until { & $Condition }
+            Mock Invoke-Native { [pscustomobject]@{ ExitCode = 0; StdOut = '{"windows":[{"id":7}]}' } }
+            Mock Write-ItLog
+            $previous = $env:ITE2E_WT_COM_CLSID
+            try {
+                Remove-Item Env:ITE2E_WT_COM_CLSID -ErrorAction SilentlyContinue
+                Resolve-WtComClsid $app 5 | Should -Be $script:ItBrandClsids.Dev
+                Should -Invoke Wait-Until -Times 1 -Exactly -ParameterFilter { $TimeoutSec -eq 5 }
+                Should -Invoke Invoke-Native -Times 1 -Exactly -ParameterFilter {
+                    $Environment.WT_COM_CLSID -eq $script:ItBrandClsids.Dev
+                }
+            }
+            finally {
+                $env:ITE2E_WT_COM_CLSID = $previous
+            }
+        }
+    }
+
+    It 'uses only the explicit endpoint rather than probing another installed brand' {
+        InModuleScope ItE2E {
+            $app = [pscustomobject]@{
+                Package = 'ExampleTerminal_0123456789abc'
+                WtcliPath = 'fixture-wtcli.exe'
+                ComClsid = $null
+            }
+            Mock Wait-Until { & $Condition }
+            Mock Invoke-Native { [pscustomobject]@{ ExitCode = 0; StdOut = '{"windows":[{"id":7}]}' } }
+            Mock Write-ItLog
+
+            $previous = $env:ITE2E_WT_COM_CLSID
+            try {
+                $env:ITE2E_WT_COM_CLSID = '11111111-2222-4333-8444-555555555555'
+                Resolve-WtComClsid -App $app | Should -Be '{11111111-2222-4333-8444-555555555555}'
+            }
+            finally {
+                $env:ITE2E_WT_COM_CLSID = $previous
+            }
+
+            Should -Invoke Invoke-Native -Times 1 -Exactly -ParameterFilter {
+                $Environment.WT_COM_CLSID -eq '{11111111-2222-4333-8444-555555555555}'
+            }
+        }
+    }
+
+    It 'rejects an invalid override or conflicting cached identity without making a native call' {
+        InModuleScope ItE2E {
+            $app = [pscustomobject]@{
+                Package = 'ExampleTerminal_0123456789abc'
+                WtcliPath = 'fixture-wtcli.exe'
+                ComClsid = '{aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}'
+            }
+            Mock Invoke-Native
+
+            { Resolve-WtComClsid -App $app -ComClsid 'not-a-guid' } | Should -Throw '*COM override*'
+            { Resolve-WtComClsid -App $app -ComClsid '{11111111-2222-4333-8444-555555555555}' } |
+                Should -Throw '*cached*'
+            $app.ComClsid = '11111111-2222-4333-8444-555555555555'
+            Resolve-WtComClsid -App $app -ComClsid '{11111111-2222-4333-8444-555555555555}' |
+                Should -Be '{11111111-2222-4333-8444-555555555555}'
+            $app.ComClsid | Should -Be '{11111111-2222-4333-8444-555555555555}'
+
+            Should -Invoke Invoke-Native -Times 0 -Exactly
+        }
+    }
+
+    It 'does not fall back to another brand when the explicit endpoint is unavailable' {
+        InModuleScope ItE2E {
+            $app = [pscustomobject]@{
+                Package = 'ExampleTerminal_0123456789abc'
+                WtcliPath = 'fixture-wtcli.exe'
+                ComClsid = $null
+            }
+            Mock Wait-Until { & $Condition }
+            Mock Invoke-Native { [pscustomobject]@{ ExitCode = 1; StdOut = '' } }
+            Mock Write-ItLog
+
+            { Resolve-WtComClsid -App $app -ComClsid '{11111111-2222-4333-8444-555555555555}' } |
+                Should -Throw '*Could not resolve*'
+
+            Should -Invoke Invoke-Native -Times 1 -Exactly -ParameterFilter {
+                $Environment.WT_COM_CLSID -eq '{11111111-2222-4333-8444-555555555555}'
+            }
+        }
+    }
+}
+
+Describe 'Parameterized Copilot hook configuration' -Tag 'Unit' {
+    It 'operates only on an explicit configuration file and restores its contents' {
+        $path = Join-Path $TestDrive 'isolated-[profile]-config.json'
+        '{"installedPlugins":[{"name":"wt-agent-hooks","enabled":true}],"unrelated":"preserve"}' |
+            Set-Content -LiteralPath $path -Encoding utf8 -NoNewline
+        $original = Get-Content -LiteralPath $path -Raw
+        $other = Join-Path $TestDrive 'other-copilot-config.json'
+        '{"installedPlugins":[],"unrelated":"untouched"}' | Set-Content -LiteralPath $other -Encoding utf8
+        $otherHash = (Get-FileHash -LiteralPath $other).Hash
+        $previous = $env:ITE2E_COPILOT_CONFIG
+
+        try {
+            $env:ITE2E_COPILOT_CONFIG = $other
+            Get-CopilotHooksInstalled | Should -BeFalse
+            Get-CopilotHooksInstalled -ConfigPath $path | Should -BeTrue
+            $state = Backup-CopilotConfig -ConfigPath $path
+            Remove-CopilotHooksEntry -ConfigPath $path
+
+            Get-CopilotHooksInstalled -ConfigPath $path | Should -BeFalse
+            (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).unrelated | Should -Be 'preserve'
+            Restore-CopilotConfig -State $state
+            (Get-Content -LiteralPath $path -Raw) | Should -Be $original
+            (Get-FileHash -LiteralPath $other).Hash | Should -Be $otherHash
+        }
+        finally {
+            $env:ITE2E_COPILOT_CONFIG = $previous
+        }
+    }
+}
+
 Describe 'Agent settings cleanup' -Tag 'Unit' {
     It 'removes showTokenUsageAndCost while preserving profiles' {
         $settingsPath = Join-Path $TestDrive 'settings.json'
