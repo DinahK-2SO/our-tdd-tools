@@ -128,7 +128,8 @@ still need `git push -u <REMOTE_NAME> <BRANCH_NAME>` to establish tracking.
 When targets are unset, the generated `AGENTS.md` guides the agent to inspect the
 current GitHub host/account, verify a same-name fork's relationship, write permission
 and visibility, then propose dev/publish destinations and a separate PR base for
-one user confirmation. Confirmed mappings are reused; public dev exposure is flagged.
+one user confirmation. Confirmed mappings are reused. Neither branch may contain
+secrets or sensitive local state; dev is not private storage.
 Discovery failures require clarification, not guessed targets. This is agent guidance,
 not setup-time network discovery or authorization to push, create forks or switch accounts.
 

@@ -80,10 +80,9 @@ Resolve missing targets before the first publish; setup itself remains non-inter
    targets or permission to create a fork.
    Never infer write permission from ownership alone.
 4. Present one confirmation: account/host, dev repo + branch, publish repo + branch,
-   PR base repo + branch, and repository visibility. Warn that public dev branches
-   may expose private instructions/tools/history; offer a private dev target or local-only
-   dev instead. Let the user override either target. For non-GitHub or unavailable
-   discovery, ask for explicit mappings.
+   PR base repo + branch, and repository visibility. Let the user override either
+   target. For non-GitHub or unavailable discovery, ask for explicit mappings.
+   Neither branch may contain secrets or sensitive local state; dev is not private storage.
 5. After confirmation, record mappings in ignored task state and configure remotes /
    branch `pushRemote` only as authorized; preserve existing conflicting settings.
    Target confirmation does not authorize a push. Do not create forks or change

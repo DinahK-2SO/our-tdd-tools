@@ -216,11 +216,13 @@ Describe 'Shipped project boundaries' -Tag 'Unit' {
             'DevRemote.*PublishRemote', 'do not ask again', 'push URLs', 'PR base',
             'gh api --hostname', 'user --jq', '<login>/<repo-name>', 'fork network',
             'permissions\.push', 'visibility', 'UNKNOWN', 'both branches',
-            'one confirmation', 'public dev', 'ignored task state',
+            'one confirmation', 'Neither branch may contain secrets or sensitive local state',
+            'dev is not private storage', 'ignored task state',
             'does not authorize a push', 'create a fork|create forks', 'switch accounts'
         )) {
             $section | Should -Match $pattern
         }
+        $section | Should -Not -Match 'Warn that public dev|offer a private dev target'
         @(Invoke-TestGit $repo @('remote', '-v')) | Should -Be $remotesBefore
         @(Invoke-TestGit $repo @('config', '--local', '--list') | Where-Object { $_ -match '^branch\..*\.pushremote=' }).Count |
             Should -Be 0
