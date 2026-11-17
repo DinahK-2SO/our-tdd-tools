@@ -194,6 +194,39 @@ if ($Phase -eq 'Plan') { return @{ Instructions = @(); ToolDirectories = @() } }
 }
 
 Describe 'Shipped project boundaries' -Tag 'Unit' {
+    It 'installs push-target confirmation guidance for <RepositoryName> without changing remotes' -TestCases @(
+        @{ RepositoryName = 'unrelated-project'; ProjectParameters = @{} }
+        @{ RepositoryName = 'intelligent-terminal'; ProjectParameters = @{ IncludeTools = $false } }
+    ) {
+        param($RepositoryName, $ProjectParameters)
+        $toolkit = New-TestToolkitSnapshot $TestDrive $script:sourceRoot
+        $repo = New-TestRepository $TestDrive $RepositoryName
+        $null = Add-TestRemote $repo $TestDrive
+        $remotesBefore = @(Invoke-TestGit $repo @('remote', '-v'))
+        $plan = New-WinpdSetupPlan -ToolkitRoot $toolkit `
+            -Common @{ WorkingDirectory = $repo; Keyword = 'destinations'; Offline = $true } `
+            -Project $ProjectParameters
+
+        $null = Invoke-WinpdSetup -Plan $plan
+
+        $agents = Get-Content -LiteralPath (Join-Path $plan.Paths.Dev 'AGENTS.md') -Raw
+        $section = [regex]::Match($agents, '(?ms)^## Confirm push destinations\r?\n(.*?)(?=^## |\z)').Groups[1].Value
+        $section | Should -Not -BeNullOrEmpty
+        foreach ($pattern in @(
+            'DevRemote.*PublishRemote', 'do not ask again', 'push URLs', 'PR base',
+            'gh api --hostname', 'user --jq', '<login>/<repo-name>', 'fork network',
+            'permissions\.push', 'visibility', 'UNKNOWN', 'both branches',
+            'one confirmation', 'public dev', 'ignored task state',
+            'does not authorize a push', 'create a fork|create forks', 'switch accounts'
+        )) {
+            $section | Should -Match $pattern
+        }
+        @(Invoke-TestGit $repo @('remote', '-v')) | Should -Be $remotesBefore
+        @(Invoke-TestGit $repo @('config', '--local', '--list') | Where-Object { $_ -match '^branch\..*\.pushremote=' }).Count |
+            Should -Be 0
+        (Invoke-TestGit $plan.Paths.Publish @('status', '--porcelain')).Count | Should -Be 0
+    }
+
     It 'renders parameterized runtime targets without querying or launching an installed package' {
         $toolkit = New-TestToolkitSnapshot $TestDrive $script:sourceRoot
         $repo = New-TestRepository $TestDrive 'intelligent-terminal'

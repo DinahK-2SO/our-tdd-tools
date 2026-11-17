@@ -62,6 +62,33 @@ and preserve other authors' work. A personal preference does not authorize publi
 writes, thread resolution or merging. Confirm each branch's push target before
 publishing; the source `BaseRemote` is not its push destination.
 
+## Confirm push destinations
+
+Resolve missing targets before the first publish; setup itself remains non-interactive.
+
+1. Reuse explicit `DevRemote` / `PublishRemote` or task-confirmed mappings; do not ask again
+   unless they change. Inspect Git fetch/push URLs and branch settings. Identify the
+   canonical repository and PR base separately from branch storage; do not assume `origin`.
+2. For unresolved GitHub targets, use that host's identity:
+   `gh api --hostname <host> user --jq .login`. Check `<login>/<repo-name>` through
+   the same host's API; verify the fork network (parent/source), `permissions.push`
+   and visibility. A same-name unrelated repo is not a candidate. Failed or inaccessible
+   reads are UNKNOWN, not proof of absence; ask rather than switch accounts.
+3. For unresolved targets, prefer a verified writable personal fork (both branches
+   if neither is set), with the canonical repository as PR base. If no related fork
+   is found, suggest the source repository only when writable; otherwise ask for
+   targets or permission to create a fork.
+   Never infer write permission from ownership alone.
+4. Present one confirmation: account/host, dev repo + branch, publish repo + branch,
+   PR base repo + branch, and repository visibility. Warn that public dev branches
+   may expose private instructions/tools/history; offer a private dev target or local-only
+   dev instead. Let the user override either target. For non-GitHub or unavailable
+   discovery, ask for explicit mappings.
+5. After confirmation, record mappings in ignored task state and configure remotes /
+   branch `pushRemote` only as authorized; preserve existing conflicting settings.
+   Target confirmation does not authorize a push. Do not create forks or change
+   authentication without separate approval.
+
 ## Online PR review monitoring
 
 This common workflow applies to every project's authorized PR-delivery task.

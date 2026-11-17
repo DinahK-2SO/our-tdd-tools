@@ -98,10 +98,9 @@ success report covers only that path and does not authorize reclaiming the app.
 - Personal / fork repository remote: `<PERSONAL_OR_FORK_REMOTE>`
 - Remote policy: `<REMOTES_AND_PUSH_POLICY>`
 - Fill every branch-to-remote mapping explicitly; remote names are environment-specific.
-  If a personal/fork remote exists, ask which non-publish branches should use it. If it
-  does not exist, ask whether to add one. When the user declines or the project does not
-  use forks, the personal/fork, dev, and publish fields may all explicitly name the same
-  production repository remote.
+  Follow the generated dev-root `AGENTS.md` section **Confirm push destinations**:
+  reuse confirmed targets, otherwise discover candidates and ask once. Without that
+  contract, ask for explicit dev/publish targets and a separate PR base before pushing.
 - Push each branch only according to the filled mapping; never silently substitute a
   different remote.
 - After each push, verify that the exact local SHA matches the intended remote branch.
