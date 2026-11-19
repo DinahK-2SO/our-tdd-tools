@@ -14,6 +14,60 @@ changing product behavior; do not infer them from the branch keyword.
 - Required validation and why: `<VALIDATION_PLAN>`
 - Real dependency acceptance required and why: `<REAL_ACCEPTANCE_REQUIRED>`
 
+## Step plan and dev checkpoints
+
+The task plan is `test_plan.md` at the **dev worktree root**, beside this
+`AGENTS.md`. Read it before starting or resuming work. After setup and before
+implementation, the agent writes the task-specific plan and tracks it on dev.
+Do not overwrite an existing plan: resume the matching task, or ask about a
+collision. Setup and its reruns do not own this file.
+
+Use one entry per independently verifiable outcome:
+
+```markdown
+### S01 | <observable outcome>
+- Depends on: <step IDs or none>
+- Status: pending
+- Acceptance: Given <state>, when <action>, then <observable result>.
+- Preserve: <behavior that must still work; negative control>
+- Verify: <repo-relative command and exact test, or reproducible manual check>
+- Evidence: <append actual RED/GREEN results, or blocker and unverified scope>
+```
+
+A leaf covers one behavior, can pass or fail without any later step, and leaves
+a usable dev checkpoint. Split outcomes that can be accepted independently;
+keep RED, the fix, GREEN and the control for one behavior together.
+
+1. Commit the initial plan **alone**, before changing product code. Its subject,
+   and that of every later plan-only commit, must start with the literal
+   `[change plan]` (example: `[change plan] Split S03 into S03a and S03b`).
+   Inspect the staged diff; do not include setup output or implementation.
+2. Work on one dependency-ready leaf at a time. Mark it in progress, then
+   verify and fix until its acceptance and relevant controls pass. If blocked,
+   append the reason and stop or plan the prerequisite; never weaken the
+   acceptance criterion to turn a failure green.
+3. Mark the leaf verified and append its actual results in the **same dev
+   commit** as the implementation and tests. Start its subject with the step ID
+   (example: `S02: Keep activation unchanged while browsing`). A completion
+   check-off is not a `[change plan]` commit.
+4. On discovery, add, update or split **pending** steps only. Keep stable IDs;
+   retain a split parent with its child IDs and update dependent steps. Record
+   the discovery, decision and reason in the plan. Preserve started criteria
+   and prior evidence; add a linked follow-up for a verified step rather than
+   rewriting it. Record out-of-scope discoveries without silently adding work.
+   Commit these planning changes alone, even if discovered during a fix.
+5. Push each plan or verified-step checkpoint to the confirmed dev branch
+   before continuing. Obtain authorization for recurring dev pushes and confirm
+   the destination as described below; neither setup nor a target mapping grants
+   that permission. If not authorized, or if a push fails, stop and identify
+   the local-only checkpoint. Never force-push to resolve divergence.
+
+On another machine, fetch the confirmed dev branch, read the plan and match
+the last verified entry to its step commit. Restore local prerequisites and
+resume the first unfinished, dependency-ready leaf. Only pushed history is
+portable. Keep the plan and evidence summaries free of secrets, private logs
+and machine-specific paths. Do not copy the task plan into publish history.
+
 ## RED / GREEN
 
 1. Reconstruct the user path and identify the owning abstraction.

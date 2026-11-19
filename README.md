@@ -48,6 +48,14 @@ That original file is also preserved byte-for-byte under
 `.winpd\original\AGENTS.md`. Semantic fields such as `<FEATURE_GOAL>` and
 `<RED_ORACLE>` remain unfilled: the keyword is not a feature description.
 
+After setup, the agent creates or resumes `test_plan.md` at the dev worktree
+root. The generated `AGENTS.md` contains the leaf template and checkpoint
+rules. Commit new plans and revisions to pending steps separately with a
+`[change plan]` subject prefix. Work one leaf at a time; commit its verified
+result with the fix and tests. With dev pushes authorized, push each checkpoint
+before proceeding. Another machine resumes from the remote dev branch, not
+from a chat transcript. Setup itself does not create commits or push a plan.
+
 The same command works in an unrelated repository, without Terminal installed.
 It explicitly reports the `common` profile when no project matches.
 
