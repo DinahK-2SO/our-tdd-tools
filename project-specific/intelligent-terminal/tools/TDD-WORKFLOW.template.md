@@ -18,7 +18,7 @@
 - `<LOCAL_ARTIFACT_DIR>` and `<SENSITIVE_DATA_RULES>`
 - `<DEFINITION_OF_DONE>`
 - `<CHANGE_KIND>`, `<VALIDATION_PLAN>` and `<COVERAGE_BUDGET>`: agreed scope and proportionate coverage
-- `<REAL_ACCEPTANCE_REQUIRED>` and `<REAL_ACCEPTANCE_REASON>`: explicit applicability and disposition
+- `<REAL_ACCEPTANCE_REQUIRED>` and `<REAL_ACCEPTANCE_REASON>`: additional feature-specific real acceptance beyond the mandatory published-head smoke
 
 Remove instructions that do not apply. Add issue-specific invariants, failure
 signatures, environment prerequisites and exact acceptance oracles. Do not leave
@@ -39,7 +39,7 @@ unpublished framework, its paths or private machine-acceptance status in public 
 - Oracle priority: protocol/event, persisted state, structured log, rendered UI,
   then model output only when model output is itself under test.
 - Change kind / validation plan: `<CHANGE_KIND>` / `<VALIDATION_PLAN>`
-- Real acceptance required / reason: `<REAL_ACCEPTANCE_REQUIRED>` / `<REAL_ACCEPTANCE_REASON>`
+- Additional feature-specific real acceptance / reason: `<REAL_ACCEPTANCE_REQUIRED>` / `<REAL_ACCEPTANCE_REASON>`
 - Current stage: `<CURRENT_STAGE>`; distinguish `PREPARATION`, `PAUSED_USER_DISCUSSION`, RED,
   implementation and acceptance. Preparation completion is not product completion.
 - Track `ENGINEERING_COMPLETE`, `AWAITING_HUMAN_REVIEW`, PR lifecycle and
@@ -48,6 +48,9 @@ unpublished framework, its paths or private machine-acceptance status in public 
 ### Live package selection
 
 For an unshipped PR, default to `Dev` built and deployed from the exact publish HEAD.
+Before a PR exists, build and test the local revision in this worktree. Install
+or refresh its Dev target and run the test-owned app without separate approval.
+Use an isolated Dev identity if another worktree owns the registration.
 Do not ask merely to choose Dev or Store: the PR under test determines the target.
 An already installed Dev package or `Auto` cannot establish PR freshness; verify
 source, staging, package, installed and live identities before the test. Set
@@ -59,12 +62,13 @@ closing user windows, uninstalling packages, or discarding settings.
 
 ### Authorized Dev window closure
 
-Record the user's standing permission for Dev test-window closure in the active
-task contract. Once granted, honor it without repeatedly asking. Classify
+The test may close windows it created after verifying their identity. To close
+a pre-existing Dev window, record the user's standing permission for that
+window in the active task contract; do not require it for tests in a new window. Classify
 `WindowsTerminal.exe` processes by their installed package family and full
 `Win32_Process.ExecutablePath`, not by process name:
 
-| Product | Package family | Dev-test close permission |
+| Product | Package family | Permission to close a pre-existing window |
 | --- | --- | --- |
 | Ordinary Windows Terminal | `Microsoft.WindowsTerminal_8wekyb3d8bbwe` | Never covered |
 | Store Intelligent Terminal | `Microsoft.IntelligentTerminal_8wekyb3d8bbwe` | Never covered |
@@ -109,7 +113,8 @@ success report covers only that path and does not authorize reclaiming the app.
   that run independently on frameworks already public in the target base. The
   unpublished TDD framework and its selftests, runners, acceptance scripts and
   experiments remain dev-only. Verify dependency resolution and test discovery in
-  a clean publish worktree without the private kit; do not copy it in to make tests pass.
+  a clean publish worktree without the private kit. Record any unrun checks in
+  the PR; do not copy the private kit in to make tests pass.
 - Audit every new publish commit, not only the final tree. Private framework code,
   configuration, harnesses and artifacts must never appear in publish history and
   then be deleted by a later commit. Publishing shared framework code needs separate
@@ -118,6 +123,8 @@ success report covers only that path and does not authorize reclaiming the app.
   `Test-LocalTddPublication.ps1` from the private kit against the clean candidate
   history and exact draft files. Follow the preflight in `TEST-BOUNDARIES.md`;
   retain its pinned commits/text hashes locally and rerun after any edit.
+  If the helper is unavailable, inspect the same candidate history and outgoing
+  text directly; do not publish secrets or uninspected content.
   A known-marker pass does not replace dependency review or authorize publication.
 - Local tracking, orchestration, captures and credentials do not enter publish commits.
 - Any real login, credentials, preauthenticated account/catalog/session dependency or model/quota
@@ -134,7 +141,8 @@ success report covers only that path and does not authorize reclaiming the app.
   `<COVERAGE_BUDGET>`, `<REAL_ACCEPTANCE_REQUIRED>` and its reason, plus explicit in-scope/non-goals.
 - Keep the full affected-layer gates for product changes. Preparation/docs use accurate records
   and relevant document checks; deterministic tooling uses actual focused/relevant suites.
-  Run real acceptance only when the contract requires it. Obtain explicit authorization before
+  Every published PR head also needs the real-agent smoke below. Run additional
+  real scenarios when the feature contract requires them. Obtain explicit authorization before
   omitting an otherwise required build/deployment, physical run or inference gate.
   Record date, covered heads/scope, unrun items
   and conditions requiring reassessment. Historical evidence is not a new-head PASS.
@@ -163,9 +171,9 @@ success report covers only that path and does not authorize reclaiming the app.
 
   `LOCAL_TDD_PUBLISH_PR_NUMBER` and `LOCAL_TDD_PUBLISH_BRANCH` are read from the current process
   environment. Do not echo their values into tracked reports or commit messages.
-- Blank patch lines and empty text files are valid scan input. A script or parameter-binding
-  failure blocks push until the tool is repaired and rerun; it is neither a reference finding nor
-  a successful scan.
+- Blank patch lines and empty text files are valid scan input. A tool failure
+  is not a clean scan. Inspect the affected dev range directly or retain that
+  checkpoint locally; it does not prevent local tests or a separate product PR.
 - If the gate finds a reference, fix it before push. If the reference was already pushed, stop and
   ask the user before any history rewrite. Use a local backup and exact `--force-with-lease`; never
   assume rewriting history will remove an existing public timeline event.
@@ -194,9 +202,8 @@ deployment or model request. Keep required but unrun gates explicit.
 8. Run `<LIVE_E2E_CASES>` against explicit `<PACKAGE_SELECTOR>`.
 9. Record test totals, build result, receipt hash and artifact paths.
 10. Commit/push according to the branch policy and complete the iteration's applicable gates.
-    Product-input changes need fresh exact-head build/deploy. Test/docs-only changes may use an
-    explicitly recorded unchanged-product provenance split; established real gates are not
-    silently waived.
+    Before publication, tests/docs-only checks may record unchanged-product
+    provenance. That does not replace the fresh build/deploy or inference for a published head.
 
 ### Focused runner and oracle guardrails
 
@@ -281,15 +288,21 @@ deployment or model request. Keep required but unrun gates explicit.
 
 ## Post-Push Real Dependency Local E2E
 
-Retain this section when `<REAL_ACCEPTANCE_REQUIRED>` is true under the active contract.
-It is not triggered merely by a changed Git HEAD. Preparation/internal records do not deploy a
-product; deterministic test/tooling changes use the explicit plan. Changing established gates
-still needs user disposition, never a convenient "not run" relabeled PASS.
+Open the PR first. On creation and every successful push of a different SHA to
+that open PR, immediately start the local real-agent smoke for its newest remote
+head, including docs-only and test-only changes. Run it alongside online review
+and CI, not after them. The publishing agent dispatches it; the read-only review
+monitor does not launch apps or spend tokens. Do not dispatch twice for the
+same head, or for dev checkpoints, metadata edits or base-only changes.
 
-When applicable, run this gate after push on a fresh exact-head deployment. Authentication-only
-acceptance proves actual user authorization and session/reconnect, without requiring a model token.
-A real model/provider/tool contract must produce inference and its required downstream effect.
-Both harness categories stay dev/local-only, even zero-token real login.
+Use the dev-only `Invoke-LocalTddRealAcceptance.ps1` driver with a fresh build
+receipt, task budget and per-head run directory (see **Bounded real-provider
+driver** in the toolbox README). The supplied `examples\RealUser.Marker.ps1`
+scenario asks real Copilot through the Agent Pane to write a unique marker and
+verifies its contents. A feature-specific real scenario that covers the same
+round trip can satisfy the smoke without a second paid request. An
+authentication-only or mock scenario cannot. `REAL_ACCEPTANCE_REQUIRED`
+controls additional feature coverage, not this baseline.
 
 1. Read the PR and remote publish heads after push; both must equal the clean publish worktree's
    exact full SHA, not merely an ancestor. Record the push-completion time.
@@ -316,15 +329,23 @@ Both harness categories stay dev/local-only, even zero-token real login.
    If usage is unavailable, say so instead of inventing counts; retain real request/response and
    behavior evidence. Restore settings, clipboard and provider configuration in `finally`, preserve
    authentication, and clean up only this run's processes/workspace.
-7. Re-read PR and remote publish heads at completion. If either advanced while this real gate is
-   still required, retain old evidence as history and rerun on the latest published HEAD.
+7. On a new push, replace the pending SHA rather than queuing intervening heads.
+   Record the old run as superseded and start preparation/build for the newest SHA
+   immediately in a separate clean source location if needed. Do not deploy or
+   submit for a stale SHA: recheck the remote head at phase boundaries. If the
+   old real driver is running, atomically rename a temporary file containing the
+   new full SHA to `superseded-by.txt` inside that old run's directory. It exits
+   cooperatively at a checkpoint and runs its owned cleanup. Keep already reserved
+   requests charged. Serialize deployment and foreground UI on a shared target;
+   never kill the user's app or interrupt a package transaction. Use separate
+   run directories and recheck both remote refs at completion: a late old result
+   is historical, never a pass or failure for the newest head.
 8. Unmet behavior or cleanup is FAIL; missing external prerequisites are BLOCKED; missing evidence
    is UNKNOWN. None, including not-run, permits a ready-for-merge claim. Only an explicit user
    deferral/waiver for a named iteration may stop the gate: record date, SHA, scope and unrun items
    as deferred/waived, never PASS, and never extend that exception beyond its approved scope.
-   If the user explicitly covers later iterations within a named tests/tooling-only scope, record
-   each covered head without restarting waived gates. Reassess before product changes or any work
-   outside that authorization; never generalize the exception to unrelated tasks.
+   A feature-specific exception or a prior head's disposition does not satisfy
+   the next published head's smoke.
 
 ## Local Evidence and Security
 
@@ -387,10 +408,10 @@ Both harness categories stay dev/local-only, even zero-token real login.
 
 ## PR and Parallel Validation
 
-- Once the publish branch is clean and has deterministic RED/GREEN, focused/full relevant
-  source validation and any required exact-package evidence, ordinary-push it and create a PR.
-  This permits review, not completion: all contract-required post-push gates must then run
-  against that exact HEAD in parallel with online review.
+- Push the shareable product change to its configured branch. Open a draft PR when
+  local validation, CI or acceptance is still pending or a check has failed; report
+  that state in the PR and continue local testing in parallel. Do not wait for a
+  second approval to create the PR. Required evidence still applies to completion.
 - Read and follow the applicable repository PR template, preserving its headings, comments,
   checklist and ordering instead of substituting a generic body.
   Apply its required language and length limits plus the selected user profile.
@@ -418,8 +439,8 @@ Both harness categories stay dev/local-only, even zero-token real login.
   pickup; an API success alone is insufficient. Never use bot mentions or empty commits
   as triggers. Switch immediately to the 30-minute post-PR watcher and run exact
   publish-head local acceptance in parallel with online review and CI.
-- On every published HEAD change, reassess affected inputs and the recorded applicable plan;
-  merely reassociating old checks, reviews or local evidence is insufficient.
+- Start the published-head smoke in the same open/push handoff. Reassess additional
+  feature scenarios separately; never carry a passing result forward to another SHA.
 - Critically triage every visible, file-level, suppressed and spelling finding against
   the exact code and behavior; do not blindly accept automated comments or ignore green
   check annotations.
@@ -500,10 +521,9 @@ an unchanged observation does not refresh it or fabricate human approval.
 
 Retain these Terminal workflow constraints alongside the common rules:
 
-- Run applicable exact publish-head local acceptance in parallel with online
-  review and CI. A changed publish head needs fresh applicable evidence; metadata,
-  base advancement or a monitoring tick alone does not require deployment or
-  another real-provider request when the tested product inputs have not changed.
+- Keep the publisher's real-agent smoke independent of the read-only watcher.
+  Every new PR head needs its own fresh result; a metadata edit, base advancement
+  or monitoring tick without a head change does not start another run.
 - Serialize authorized repairs with active implementation, build/deploy and UI
   work. Preserve package/process ownership, the current chat and any manual-app
   reservation; monitoring is not permission to close or redeploy an application.
@@ -530,8 +550,8 @@ accepted product feature.
 - [ ] Durable pipeline journal is `passed`; no required terminal or phase remains `running`.
 - [ ] Product, staged package and installed hashes match.
 - [ ] Live E2E targets the intended Dev package and process/window identity.
-- [ ] The latest published HEAD passed its applicable gates; required real acceptance ran after
-  push on the fresh exact deployment.
+- [ ] For an open PR, the latest published HEAD passed the mandatory local
+  real-agent smoke on its fresh post-publication deployment; no superseded result was credited.
 - [ ] Latest refs and evidence identify the appropriate product/validation layers with explicit provenance.
 - [ ] No fixture, unauthenticated handshake or old package substituted for a required real gate.
 - [ ] Any explicit user deferral/waiver records its iteration/scope and is not reported as PASS.

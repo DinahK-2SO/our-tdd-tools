@@ -117,6 +117,43 @@ Describe 'Real acceptance orchestration without inference' -Tag 'Unit', 'RealAcc
         (Get-Content $script:driverArgs.BudgetPath -Raw | ConvertFrom-Json).attempts[0].status | Should -Be 'failed'
     }
 
+    It 'drops a superseded head <Stage> and cleans up without crediting its result' -TestCases @(
+        @{ Stage = 'before submission'; Callback = 'Prepare'; ExpectedAttempts = 0 }
+        @{ Stage = 'while awaiting a reply'; Callback = 'Submit'; ExpectedAttempts = 1 }
+    ) {
+        param($Stage, $Callback, $ExpectedAttempts)
+        $header = [regex]::new(($Callback + ' = \{\r?\n\s*param\(\$context\)'))
+        $scenario = $header.Replace($script:scenario, {
+            param($m)
+            $m.Value + "`n" + '        [IO.File]::WriteAllText((Join-Path $context.outDir ''superseded-by.txt''), (''c'' * 40))'
+        }, 1)
+        $scenario | Set-Content $script:driverArgs.ScenarioPath
+        $result = Invoke-LocalTddRealAcceptance @script:driverArgs -AllowRealInference
+        $result.status | Should -Be 'superseded'
+        $result.head | Should -Be ('a' * 40)
+        $result.supersededBy | Should -Be ('c' * 40)
+        $result.cleanupPassed | Should -BeTrue
+        $result.promptsObserved | Should -Be 0
+        if ($ExpectedAttempts) {
+            $attempts = (Get-Content $script:driverArgs.BudgetPath -Raw | ConvertFrom-Json).attempts
+            $attempts.Count | Should -Be 1
+            $attempts[0].status | Should -Be 'unknown'
+        } else {
+            Test-Path $script:driverArgs.BudgetPath | Should -BeFalse
+        }
+    }
+
+    It 'does not mask a cleanup failure when a newer head supersedes the run' {
+        $marker = '[IO.File]::WriteAllText((Join-Path $context.outDir ''superseded-by.txt''), (''c'' * 40))'
+        $script:scenario.Replace('$context.state.events = @(', ($marker + '; $context.state.events = @(')).Replace(
+            'Cleanup = { param($context) $true }', 'Cleanup = { throw "fixture cleanup failed" }') |
+            Set-Content $script:driverArgs.ScenarioPath
+        { Invoke-LocalTddRealAcceptance @script:driverArgs -AllowRealInference } | Should -Throw '*fixture cleanup failed*'
+        $result = Get-Content (Join-Path $script:driverArgs.OutDir 'real-acceptance.json') -Raw | ConvertFrom-Json
+        $result.status | Should -Be 'failed'
+        $result.cleanupPassed | Should -BeFalse
+    }
+
     It 'rejects canonically equivalent but different observable text' {
         $script:scenario.Replace("expected = 'marker'; actual = 'marker'",
             "expected = ([string][char]0x00E9); actual = ('e' + [char]0x0301)") |

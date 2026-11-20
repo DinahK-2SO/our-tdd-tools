@@ -150,6 +150,7 @@ events, and declared offline Unit tests. Include existing AGENTS files, dirty ca
 state, absent product directories, reruns, unknown parameters, ambiguous identities,
 path traversal attempts, name collisions, interrupted application, and user edits.
 
-Preserve the imported process/account/privacy guards. Native input, installed-package
-tests, actual PR publication, and real provider inference need separate authorization
-and are not part of this implementation's validation.
+Preserve the imported process/account/privacy guards. This setup implementation
+is validated offline: it does not need native input, an installed package, an
+actual PR or real inference. This is the scope of the setup tests, not a
+restriction on local testing or PR creation in the generated workspace.

@@ -218,11 +218,15 @@ Describe 'Shipped project boundaries' -Tag 'Unit' {
             'permissions\.push', 'visibility', 'UNKNOWN', 'both branches',
             'one confirmation', 'Neither branch may contain secrets or sensitive local state',
             'dev is not private storage', 'ignored task state',
-            'does not authorize a push', 'create a fork|create forks', 'switch accounts'
+            'create a fork|create forks', 'switch accounts'
         )) {
             $section | Should -Match $pattern
         }
         $section | Should -Not -Match 'Warn that public dev|offer a private dev target'
+        $contract = $agents -replace '\s+', ' '
+        $contract | Should -Match 'open a draft PR.*without waiting for.*validation'
+        $contract | Should -Match 'run local tests.*without waiting for a push or PR'
+        $contract | Should -Not -Match 'obtain authorization for recurring dev pushes|publication require their own explicit authorization'
         @(Invoke-TestGit $repo @('remote', '-v')) | Should -Be $remotesBefore
         @(Invoke-TestGit $repo @('config', '--local', '--list') | Where-Object { $_ -match '^branch\..*\.pushremote=' }).Count |
             Should -Be 0
@@ -250,6 +254,10 @@ Describe 'Shipped project boundaries' -Tag 'Unit' {
         $agents | Should -Match ([regex]::Escape('{11111111-2222-4333-8444-555555555555}'))
         $agents | Should -Match ([regex]::Escape($configPath))
         $agents | Should -Match '<FEATURE_GOAL>'
+        $contract = $agents -replace '\s+', ' '
+        $contract | Should -Match 'install or refresh.*Dev package.*without separate approval'
+        $contract | Should -Match 'isolated Dev package.*another worktree'
+        $contract | Should -Not -Match 'do not authorize deployment|runtime validation is separately authorized'
         Test-Path -LiteralPath $configPath | Should -BeFalse
     }
 
@@ -269,6 +277,15 @@ Describe 'Shipped project boundaries' -Tag 'Unit' {
 
         $agents = Get-Content -LiteralPath (Join-Path $plan.Paths.Dev 'AGENTS.md') -Raw
         $prompts = [regex]::Matches($agents, '(?m)^/every 30m [^\r\n]+')
+        $section = [regex]::Match($agents, '(?ms)^## Published-head real-agent smoke\r?\n(.*?)(?=^## |\z)').Groups[1].Value -replace '\s+', ' '
+        if ($RepositoryName -eq 'intelligent-terminal') {
+            $section | Should -Match 'immediately after opening.*every successful push'
+            $section | Should -Match 'build and deploy.*exact.*SHA'
+            $section | Should -Match 'real inference.*in parallel with online review'
+            $section | Should -Match 'superseded.*newest head'
+        } else {
+            $section | Should -BeNullOrEmpty
+        }
         $prompts.Count | Should -Be 1
         $prompts[0].Value | Should -Match 'Online PR review monitoring'
         $agents | Should -Match 'schedule ID'

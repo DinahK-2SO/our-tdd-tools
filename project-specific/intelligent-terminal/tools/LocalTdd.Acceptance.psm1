@@ -233,6 +233,19 @@ function Assert-LocalTddPublishedDeployment {
     return $receipt
 }
 
+function Test-LocalTddSmokeSuperseded {
+    param([string]$OutDir, [hashtable]$Result)
+    $path = Join-Path $OutDir 'superseded-by.txt'
+    if (-not (Test-Path -LiteralPath $path -ErrorAction Stop)) { return $false }
+    $newHead = [IO.File]::ReadAllText($path).Trim()
+    if ($newHead -notmatch '^[a-fA-F0-9]{40}$' -or $newHead -eq $Result.head) {
+        throw 'Superseding a run requires a different, full PR head SHA.'
+    }
+    $Result.supersededBy = $newHead
+    $Result.status = 'superseded'
+    return $true
+}
+
 function Invoke-LocalTddRealAcceptance {
     [CmdletBinding()]
     param(
@@ -258,7 +271,7 @@ function Invoke-LocalTddRealAcceptance {
         processId = $PID; processStartUtc = ([Diagnostics.Process]::GetCurrentProcess()).StartTime.ToUniversalTime().ToString('o')
         startedUtc = [DateTimeOffset]::UtcNow.ToString('o'); submittedUtc = $null; completedUtc = $null
         submissionAttempted = $false; promptsObserved = 0; providerEventLogObserved = $false; cleanupPassed = $false
-        error = $null; cleanupError = $null; identityError = $null
+        error = $null; cleanupError = $null; identityError = $null; supersededBy = $null
         receiptSha256 = (Get-FileHash -LiteralPath $ReceiptPath).Hash
         scenarioSha256 = (Get-FileHash -LiteralPath $ScenarioPath).Hash
     }
@@ -271,6 +284,7 @@ function Invoke-LocalTddRealAcceptance {
         $context.receipt = $receipt
         $result.head = $receipt.gitHead
         $result.wtaSha256 = $receipt.hashes.wta
+        if (Test-LocalTddSmokeSuperseded $OutDir $result) { throw [OperationCanceledException]::new('PR head superseded before preparation.') }
         $definition = & $ScenarioPath
         if ($definition -isnot [Collections.IDictionary]) { throw 'Scenario must return a callback dictionary.' }
         foreach ($name in 'Prepare', 'Submit', 'HandleAction', 'Verify', 'Cleanup') {
@@ -296,7 +310,9 @@ function Invoke-LocalTddRealAcceptance {
         }).Count) {
             throw 'The exact prompt already exists in this session; use a fresh unique request.'
         }
+        if (Test-LocalTddSmokeSuperseded $OutDir $result) { throw [OperationCanceledException]::new('PR head superseded before submission.') }
         $null = Assert-LocalTddPublishedDeployment -RepoRoot $RepoRoot -PublicationPath $PublicationPath -ReceiptPath $ReceiptPath
+        if (Test-LocalTddSmokeSuperseded $OutDir $result) { throw [OperationCanceledException]::new('PR head superseded while checking deployment.') }
         $attempt = Reserve-LocalTddRequest -AuthorizationPath $AuthorizationPath -BudgetPath $BudgetPath `
             -Head $result.head -RunId $result.runId
         $result.attemptId = $attempt.id
@@ -308,6 +324,7 @@ function Invoke-LocalTddRealAcceptance {
         & $definition.Submit $context | Out-Null
         $handled = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         do {
+            if (Test-LocalTddSmokeSuperseded $OutDir $result) { break }
             if ([DateTimeOffset]::UtcNow -gt $deadline) { throw 'The real request exceeded its authorized deadline.' }
             # Some providers create their event log only after the first submission.
             $events = @()
@@ -359,9 +376,11 @@ function Invoke-LocalTddRealAcceptance {
         } while ($true)
     }
     catch {
-        $errorRecord = $_
-        $result.error = $_.Exception.Message
-        $result.status = if ($result.submissionAttempted) { 'failed' } else { 'blocked' }
+        if ($result.status -ne 'superseded') {
+            $errorRecord = $_
+            $result.error = $_.Exception.Message
+            $result.status = if ($result.submissionAttempted) { 'failed' } else { 'blocked' }
+        }
     }
     finally {
         try {
@@ -374,13 +393,16 @@ function Invoke-LocalTddRealAcceptance {
             $result.status = 'failed'
             $errorRecord = $_
         }
-        if ($identityEstablished) {
+        if ($identityEstablished -and $result.status -ne 'superseded') {
             try {
                 if ((Get-FileHash -LiteralPath $ReceiptPath).Hash -ne $result.receiptSha256 -or
                     (Get-FileHash -LiteralPath $ScenarioPath).Hash -ne $result.scenarioSha256) {
                     throw 'Receipt or scenario changed during real acceptance.'
                 }
-                $null = Assert-LocalTddPublishedDeployment -RepoRoot $RepoRoot -PublicationPath $PublicationPath -ReceiptPath $ReceiptPath
+                if ($result.status -ne 'passed' -or -not (Test-LocalTddSmokeSuperseded $OutDir $result)) {
+                    $null = Assert-LocalTddPublishedDeployment -RepoRoot $RepoRoot -PublicationPath $PublicationPath -ReceiptPath $ReceiptPath
+                    if ($result.status -eq 'passed') { $null = Test-LocalTddSmokeSuperseded $OutDir $result }
+                }
             }
             catch {
                 $result.identityError = $_.Exception.Message
@@ -391,7 +413,7 @@ function Invoke-LocalTddRealAcceptance {
         $result.completedUtc = [DateTimeOffset]::UtcNow.ToString('o')
         if ($attempt) {
             Set-LocalTddRequestOutcome -BudgetPath $BudgetPath -AttemptId $attempt.id `
-                -Outcome $(if ($result.status -eq 'passed') { 'passed' } else { 'failed' })
+                -Outcome $(if ($result.status -eq 'passed') { 'passed' } elseif ($result.status -eq 'superseded') { 'unknown' } else { 'failed' })
         }
         Write-LocalTddEvidenceJson -Path (Join-Path $OutDir 'real-acceptance.json') -Value $result
     }
