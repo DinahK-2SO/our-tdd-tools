@@ -408,10 +408,19 @@ Describe 'UI Automation geometry contract' -Tag 'Unit' {
 }
 
 Describe 'Resolve-ItApp' -Tag 'Unit' {
+    It 'never picks an installed package implicitly or from Auto' {
+        $previous = $env:ITE2E_PACKAGE
+        try {
+            $env:ITE2E_PACKAGE = $null
+            { Get-ItTestPackage } | Should -Throw '*explicit*'
+            { Resolve-ItApp -Package Auto } | Should -Throw '*explicit*'
+        } finally { $env:ITE2E_PACKAGE = $previous }
+    }
+
     It 'resolves a descriptor with the expected shape when a package is installed' {
-        $installed = Get-AppxPackage | Where-Object { $_.Name -like '*IntelligentTerminal*' }
+        $installed = Get-AppxPackage | Where-Object Name -in @('IntelligentTerminal','Microsoft.IntelligentTerminal') | Select-Object -First 1
         if (-not $installed) { Set-ItResult -Skipped -Because 'no IT package installed'; return }
-        $app = Resolve-ItApp -Package Auto
+        $app = Resolve-ItApp -Package $installed.PackageFamilyName
         $app.Package | Should -Match 'IntelligentTerminal'
         $app.AppUserModelId | Should -Match '!'
         $app.SettingsPath | Should -Match 'LocalState\\settings\.json$'
@@ -440,19 +449,23 @@ Describe 'Start-Terminal startup ordering' -Tag 'Unit' {
             Mock Resolve-ItApp { $fakeApp }
             Mock Enter-ItForegroundInputLease { [pscustomobject]@{} }
             Mock Exit-ItForegroundInputLease
-            Mock Get-RunningItProcesses { [pscustomobject]@{ Id = 4242; ProcessName = 'WindowsTerminal' } }
+            Mock Get-WtProcessesForApp { [pscustomobject]@{ Id = 4242; ProcessName = 'WindowsTerminal' } }
             Mock Stop-StaleItInstances
-            Mock Start-Process
+            Mock Start-ItPackageProcess
+            Mock Stop-Process
+            Mock Restore-WtConfig
 
             { Start-Terminal -Package Dev -PassFre $false -Backup $false -CleanSettings $false } |
                 Should -Throw '*already running*CloseExistingInstances*'
             Should -Invoke Stop-StaleItInstances -Times 0 -Exactly
-            Should -Invoke Start-Process -Times 0 -Exactly
+            Should -Invoke Start-ItPackageProcess -Times 0 -Exactly
+            Should -Invoke Stop-Process -Times 0 -Exactly
+            Should -Invoke Restore-WtConfig -Times 0 -Exactly
             Should -Invoke Exit-ItForegroundInputLease -Times 1 -Exactly
         }
     }
 
-    It 'waits for the first window before probing COM' {
+    It 'launches the selected package beside a running Store window and waits for its own HWND before COM' {
         InModuleScope ItE2E {
             $script:startupOrder = @()
             $root = Join-Path $env:TEMP "ite2e-startup-order-$PID"
@@ -475,8 +488,8 @@ Describe 'Start-Terminal startup ordering' -Tag 'Unit' {
             Mock Exit-ItForegroundInputLease
             Mock Get-RunningItProcesses { [pscustomobject]@{ Id = 31337; ProcessName = 'WindowsTerminal' } }
             Mock Stop-StaleItInstances
-            Mock Get-WtProcessesForApp { [pscustomobject]@{ Id = 4242 } }
-            Mock Start-Process
+            Mock Get-WtProcessesForApp { @() }
+            Mock Start-ItPackageProcess { [pscustomobject]@{ Id = 4242; StartTime = Get-Date } }
             Mock Get-WtWindowHwnds {
                 $script:startupOrder += 'hwnd'
                 [pscustomobject]@{ pid = 4242; hwnd = 9001; title = 'PowerShell' }
@@ -489,12 +502,11 @@ Describe 'Start-Terminal startup ordering' -Tag 'Unit' {
             Mock Initialize-LogOffsets
             Mock Write-ItLog
 
-            $app = Start-Terminal -Package Dev -PassFre $false -Backup $false -CleanSettings $false `
-                -CloseExistingInstances
+            $app = Start-Terminal -Package Dev -PassFre $false -Backup $false -CleanSettings $false
 
             $app.Hwnd | Should -Be 9001
             $script:startupOrder | Should -Be @('hwnd', 'com')
-            Should -Invoke Stop-StaleItInstances -Times 1 -Exactly
+            Should -Invoke Stop-StaleItInstances -Times 0 -Exactly
         }
     }
 
@@ -514,9 +526,9 @@ Describe 'Start-Terminal startup ordering' -Tag 'Unit' {
                 Pid = $null
                 Hwnd = $null
             }
-            $fakeProcess = [pscustomobject]@{ Id = 4242 }
+            $fakeApp | Add-Member WindowsTerminal 'C:\owned\WindowsTerminal.exe'
+            $fakeProcess = [pscustomobject]@{ Id = 4242; StartTime = $null; Path = $fakeApp.WindowsTerminal }
             $fakeProcess | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value { $true }
-            $script:processLookup = 0
 
             Mock Resolve-ItApp { $fakeApp }
             Mock Enter-ItForegroundInputLease { [pscustomobject]@{} }
@@ -526,21 +538,18 @@ Describe 'Start-Terminal startup ordering' -Tag 'Unit' {
             Mock Backup-WtConfig
             Mock Clear-WtConfig
             Mock Invoke-FrePass
-            Mock Start-Process
-            Mock Get-WtProcessesForApp {
-                $script:processLookup++
-                if ($script:processLookup -eq 1) { @() } else { $fakeProcess }
-            }
+            Mock Start-ItPackageProcess { $fakeProcess.StartTime = Get-Date; $fakeProcess }
+            Mock Get-WtProcessesForApp { @() }
             Mock Get-WtWindowHwnds { [pscustomobject]@{ pid = 4242; hwnd = 9001; title = 'PowerShell' } }
             Mock Resolve-WtComClsid { throw 'expected COM failure' }
             Mock Restore-WtConfig
             Mock Get-Process { $fakeProcess }
-            Mock Stop-Process
+            Mock Stop-ItCapturedProcess
             Mock Write-ItLog
 
             { Start-Terminal -Package Dev -SuppressCloseConfirmation $false } | Should -Throw '*expected COM failure*'
             Should -Invoke Restore-WtConfig -Times 1 -Exactly
-            Should -Invoke Stop-Process -Times 1 -Exactly -ParameterFilter { $Id -eq 4242 -and $Force }
+            Should -Invoke Stop-ItCapturedProcess -Times 1 -Exactly -ParameterFilter { $Process.Id -eq 4242 -and $ExpectedPath -eq $fakeApp.WindowsTerminal }
             Should -Invoke Exit-ItForegroundInputLease -Times 1 -Exactly
         }
     }

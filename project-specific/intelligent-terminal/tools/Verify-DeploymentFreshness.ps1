@@ -34,8 +34,11 @@ Add-Check 'source HEAD' ($fingerprint.Head -eq $receipt.gitHead) `
     "current=$($fingerprint.Head) receipt=$($receipt.gitHead)"
 if ($receipt.PSObject.Properties.Name -contains 'frameworkFingerprint') {
     $frameworkSourcePaths = @($receipt.frameworkSourcePaths)
+    $frameworkRoot = if ($receipt.PSObject.Properties.Name -contains 'frameworkRoot') {
+        (& git -C $kitRoot rev-parse --show-toplevel).Trim()
+    } else { $RepoRoot }
     $currentFramework = & (Join-Path $kitRoot 'Get-LocalTddSourceFingerprint.ps1') `
-        -RepoRoot $RepoRoot -SourcePaths $frameworkSourcePaths
+        -RepoRoot $frameworkRoot -SourcePaths $frameworkSourcePaths
     Add-Check 'framework fingerprint' ($currentFramework.Fingerprint -eq $receipt.frameworkFingerprint) `
         "current=$($currentFramework.Fingerprint) receipt=$($receipt.frameworkFingerprint)"
 }

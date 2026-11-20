@@ -201,14 +201,14 @@ hope.
 
 ### E2E accidentally selected the Store package
 
-`Auto` prefers Store when both Store and Dev resolve. Store and Dev also have
-independent settings/state. Set `ITE2E_PACKAGE=Dev` for local build validation.
+An unset selector or `Auto` is refused. Pin Dev or the exact private PFN;
+Store is a separate, explicitly selected baseline.
 
 ### Dev registration pointed at another worktree
 
 Loose Dev packages retain their AppX `InstallLocation`. Building one worktree
 does not update a package registered from another. The deployment script refuses
-this mismatch unless replacement is explicit and preserves application data.
+this mismatch; use the product's separate worktree identity instead.
 
 Before considering a cross-worktree update, compare the fresh build and existing
 registration **without changing either**:
@@ -233,9 +233,7 @@ its output with a current source fingerprint and build receipt before trusting i
 This is a diagnostic plan, **not a deployment command**. A future transfer would
 need separately approved ownership/idle-process checks, explicit backup paths,
 atomic per-file replacement with rollback, and post-transfer hash verification.
-`-ReplaceExistingDevRegistration` instead uses `Remove-AppxPackage
--PreserveApplicationData`; do not treat it as a harmless file-lock workaround or
-assume it preserves every user-managed cache. Preserve settings/state and only the
+`-ReplaceExistingDevRegistration` is rejected. Preserve settings/state and only the
 specific session/cache files the test actually mutates; never overwrite Windows-
 managed `SystemAppData` hives or stop an unrelated/current-chat process.
 
@@ -246,8 +244,7 @@ permission, then verify its executable path under the exact Dev `InstallLocation
 Package membership alone is not test ownership. Never kill every `WindowsTerminal.exe` or `wta.exe` by name;
 that can destroy unrelated sessions, Store instances, or the terminal hosting the current
 conversation. `Invoke-BuildDeploy.ps1` refuses to close a running current-layout package unless
-`-CloseRunningPackageProcesses` is supplied. Registration replacement is separately explicit via
-`-ReplaceExistingDevRegistration`.
+`-CloseRunningPackageProcesses` is supplied. Do not replace registrations.
 
 First enumerate and record the exact path and PID. Stop only those explicit PIDs,
 then repeat the path-based inventory and require zero remaining processes. Do not
@@ -261,11 +258,8 @@ package process is exiting. Inspect Restart Manager or enumerate exact package
 process paths before retrying. If no persistent owner remains, retry the same
 deployment once; if an owner remains, record its PID/path and stop it only when this
 run owns it or has explicit close permission, never when it hosts the current chat.
-Do not use an ad hoc `Remove-AppxPackage` as a file-lock workaround. The legacy
-`-ReplaceExistingDevRegistration` flag performs removal with `-PreserveApplicationData`;
-window-close permission does not authorize it. Prefer the selected repository revision's
-supported data-preserving deployment path. Its replacement/rollback policy remains
-a separately scoped issue in `PRACTICE-CONFLICTS.md`.
+Do not uninstall a package as a file-lock workaround. Use the supported
+data-preserving path or an independently registered private Dev identity.
 
 ### A nonbehavioral source edit invalidated the receipt
 

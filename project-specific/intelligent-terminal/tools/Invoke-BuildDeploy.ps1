@@ -6,14 +6,29 @@ param(
     [switch]$ReplaceExistingDevRegistration,
     [switch]$CloseRunningPackageProcesses,
     [switch]$Launch,
-    [string[]]$SourcePaths
+    [string[]]$SourcePaths,
+    [string]$RepoRoot,
+    [string]$PublicationPath,
+    [ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ExpectedHead
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $kitRoot = $PSScriptRoot
-$repoRoot = (& git -C $kitRoot rev-parse --show-toplevel).Trim()
+. (Join-Path $kitRoot 'DevTarget.ps1')
+$frameworkRoot = (& git -C $kitRoot rev-parse --show-toplevel).Trim()
+if (-not $RepoRoot) { $RepoRoot = $frameworkRoot }
+$repoRoot = [IO.Path]::GetFullPath((& git -C $RepoRoot rev-parse --show-toplevel).Trim())
+if ($LASTEXITCODE) { throw 'Cannot resolve the selected product source.' }
+if ($ExpectedHead -and ((git -C $repoRoot rev-parse HEAD) -ne $ExpectedHead -or @(git -C $repoRoot status --porcelain).Count)) {
+    throw 'Expected a clean checkout at the published PR head.'
+}
+if ($ReplaceExistingDevRegistration) { throw 'Refusing to replace another registration. Use a private worktree package.' }
+if ($PublicationPath) {
+    $publication = Get-Content -LiteralPath $PublicationPath -Raw | ConvertFrom-Json -AsHashtable
+    Assert-LocalTddRemoteHead $repoRoot $publication $ExpectedHead
+}
 $rustTarget = 'x86_64-pc-windows-msvc'
 $rustProfile = if ($Configuration -eq 'Release') { 'release' } else { 'debug' }
 $manifest = Join-Path $repoRoot 'tools\wta\Cargo.toml'
@@ -67,11 +82,11 @@ function Stop-ExactPackageProcesses($Package) {
 $fingerprint = & (Join-Path $kitRoot 'Get-LocalTddSourceFingerprint.ps1') -RepoRoot $repoRoot -SourcePaths $SourcePaths
 $commonToolsRoot = [IO.Path]::GetFullPath((Join-Path $kitRoot '..\..\..\common\tools'))
 $frameworkSourcePaths = @(
-    [IO.Path]::GetRelativePath($repoRoot, $kitRoot).Replace('\', '/')
-    [IO.Path]::GetRelativePath($repoRoot, $commonToolsRoot).Replace('\', '/')
+    [IO.Path]::GetRelativePath($frameworkRoot, $kitRoot).Replace('\', '/')
+    [IO.Path]::GetRelativePath($frameworkRoot, $commonToolsRoot).Replace('\', '/')
 )
 $frameworkFingerprint = & (Join-Path $kitRoot 'Get-LocalTddSourceFingerprint.ps1') `
-    -RepoRoot $repoRoot -SourcePaths $frameworkSourcePaths
+    -RepoRoot $frameworkRoot -SourcePaths $frameworkSourcePaths
 $buildStarted = [DateTime]::UtcNow
 
 Invoke-Step 'Build source-matched wtcli' {
@@ -92,17 +107,19 @@ if ($LASTEXITCODE -ne 0 -or $wtcliHelp -notmatch 'agent-hook') {
 if (-not $SkipWtaTests) {
     Invoke-Step 'Test WTA with source-matched wtcli' {
         $previousPath = $env:PATH
+        Push-Location $repoRoot
         try {
             $env:PATH = "$(Split-Path $wtcli -Parent);$previousPath"
             cargo test --target $rustTarget --manifest-path $manifest
         }
-        finally { $env:PATH = $previousPath }
+        finally { $env:PATH = $previousPath; Pop-Location }
     }
 }
 Invoke-Step 'Build explicit-target WTA product' {
     $args = @('build', '--target', $rustTarget, '--manifest-path', $manifest)
     if ($Configuration -eq 'Release') { $args += '--release' }
-    & cargo @args
+    Push-Location $repoRoot
+    try { & cargo @args } finally { Pop-Location }
 }
 if (-not (Test-Path -LiteralPath $cargoWta -PathType Leaf)) { throw "Expected WTA product missing: $cargoWta" }
 
@@ -148,16 +165,17 @@ if ($cargoHash -ne $stagedHash) {
 }
 
 if (-not $SkipDeploy) {
+    if ($PublicationPath) { Assert-LocalTddRemoteHead $repoRoot $publication $fingerprint.Head }
     if ($Configuration -ne 'Debug') {
         throw 'The safe loose-package deployment helper accepts Debug recipes only. Use -SkipDeploy for Release.'
     }
     $existing = Get-DevPackage
+    $sameName = @(Get-AppxPackage -Name IntelligentTerminal -ErrorAction Stop)
+    if (@($sameName | Where-Object PackageFamilyName -CNE $packageFamily).Count) {
+        throw 'Another publisher owns this package name; refusing deployment.'
+    }
     if ($existing -and -not [IO.Path]::GetFullPath([string]$existing.InstallLocation).Equals($expectedLayout, [StringComparison]::OrdinalIgnoreCase)) {
-        if (-not $ReplaceExistingDevRegistration) {
-            throw "Dev package is registered from another worktree: $($existing.InstallLocation). Re-run with -ReplaceExistingDevRegistration to replace it while preserving app data."
-        }
-        Stop-ExactPackageProcesses $existing
-        Remove-AppxPackage -Package $existing.PackageFullName -PreserveApplicationData
+        throw "Dev package is registered from another worktree: $($existing.InstallLocation). Use an isolated Dev target."
     }
     $deploy = Join-Path $repoRoot 'build\scripts\Invoke-IntelligentTerminalDebugDeployment.ps1'
     & $deploy -AppxRecipePath $recipe -NoRestart
@@ -200,6 +218,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $receiptPath -Parent) | Ou
     sourceFingerprint = $fingerprint.Fingerprint
     sourcePaths = $SourcePaths
     frameworkFingerprint = $frameworkFingerprint.Fingerprint
+    frameworkRoot = $frameworkRoot
     frameworkSourcePaths = $frameworkSourcePaths
     configuration = $Configuration
     platform = 'x64'

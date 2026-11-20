@@ -5,6 +5,7 @@ $commonTools = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\common\
 #Requires -Version 7.0
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'DevTarget.ps1')
 
 function Write-LocalTddEvidenceJson {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Value)
@@ -207,20 +208,18 @@ function Assert-LocalTddPublishedDeployment {
     if ($LASTEXITCODE -ne 0 -or $dirty.Count -or $head -ne $publication.head) {
         throw 'Publication requires the exact clean source HEAD.'
     }
-    & git -C $RepoRoot check-ref-format --branch $publication.branch | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Invalid publish branch.' }
-    $remote = @(& git -C $RepoRoot ls-remote -- $publication.remote "refs/heads/$($publication.branch)")
-    if ($LASTEXITCODE -ne 0 -or $remote.Count -ne 1 -or ($remote[0] -split '\s+')[0] -ne $head) {
-        throw 'Remote publish HEAD differs from the source.'
-    }
-    $prText = & gh pr view $publication.pullRequest --repo $publication.repository --json headRefOid,state
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the PR HEAD.' }
-    $pr = $prText | ConvertFrom-Json -AsHashtable
-    if ($pr.headRefOid -ne $head -or $pr.state -ne 'OPEN') { throw 'The PR no longer matches the open published iteration.' }
+    Assert-LocalTddRemoteHead $RepoRoot $publication $head
     $receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json -AsHashtable
+    $selector = if ($publication.Contains('packageFamily')) { $publication.packageFamily } else { 'Dev' }
+    $family = Resolve-LocalTddDevFamily $selector
     if ($receipt.gitHead -ne $head -or $receipt.installVerified -ne $true -or
-        $receipt.packageFamily -ne 'IntelligentTerminal_rd9vj3e6a2mbr') {
+        $receipt.packageFamily -cne $family) {
         throw 'The receipt does not prove this published Dev build.'
+    }
+    if ($family -like 'IntelligentTerminal.Worktree.*') {
+        $registered = @(Get-AppxPackage -ErrorAction Stop | Where-Object PackageFamilyName -CEQ $family)
+        if ($registered.Count -ne 1) { throw 'Private Dev target is not uniquely registered.' }
+        $null = Get-ItPrivateProtocolClsid $registered[0]
     }
     $pushed = ConvertTo-LocalTddTime $publication.pushedUtc
     $built = ConvertTo-LocalTddTime $receipt.buildStartedUtc
@@ -234,8 +233,7 @@ function Assert-LocalTddPublishedDeployment {
 }
 
 function Test-LocalTddSmokeSuperseded {
-    param([string]$OutDir, [hashtable]$Result)
-    $path = Join-Path $OutDir 'superseded-by.txt'
+    param([string]$Path, [hashtable]$Result)
     if (-not (Test-Path -LiteralPath $path -ErrorAction Stop)) { return $false }
     $newHead = [IO.File]::ReadAllText($path).Trim()
     if ($newHead -notmatch '^[a-fA-F0-9]{40}$' -or $newHead -eq $Result.head) {
@@ -256,12 +254,14 @@ function Invoke-LocalTddRealAcceptance {
         [Parameter(Mandatory)][string]$AuthorizationPath,
         [Parameter(Mandatory)][string]$BudgetPath,
         [Parameter(Mandatory)][string]$OutDir,
+        [string]$SupersessionPath,
         [switch]$AllowRealInference
     )
     if (-not $AllowRealInference) { throw 'Real acceptance requires explicit -AllowRealInference opt-in.' }
     $null = Read-LocalTddAuthorization $AuthorizationPath
     $definition = $null
     $OutDir = [IO.Path]::GetFullPath($OutDir)
+    if (-not $SupersessionPath) { $SupersessionPath = Join-Path $OutDir 'superseded-by.txt' }
     if (Test-Path -LiteralPath $OutDir) { throw 'Use a new real-acceptance evidence directory.' }
     New-Item -ItemType Directory -Path $OutDir | Out-Null
     $context = @{ repoRoot = $RepoRoot; outDir = $OutDir; state = @{} }
@@ -284,7 +284,7 @@ function Invoke-LocalTddRealAcceptance {
         $context.receipt = $receipt
         $result.head = $receipt.gitHead
         $result.wtaSha256 = $receipt.hashes.wta
-        if (Test-LocalTddSmokeSuperseded $OutDir $result) { throw [OperationCanceledException]::new('PR head superseded before preparation.') }
+        if (Test-LocalTddSmokeSuperseded $SupersessionPath $result) { throw [OperationCanceledException]::new('PR head superseded before preparation.') }
         $definition = & $ScenarioPath
         if ($definition -isnot [Collections.IDictionary]) { throw 'Scenario must return a callback dictionary.' }
         foreach ($name in 'Prepare', 'Submit', 'HandleAction', 'Verify', 'Cleanup') {
@@ -310,9 +310,9 @@ function Invoke-LocalTddRealAcceptance {
         }).Count) {
             throw 'The exact prompt already exists in this session; use a fresh unique request.'
         }
-        if (Test-LocalTddSmokeSuperseded $OutDir $result) { throw [OperationCanceledException]::new('PR head superseded before submission.') }
+        if (Test-LocalTddSmokeSuperseded $SupersessionPath $result) { throw [OperationCanceledException]::new('PR head superseded before submission.') }
         $null = Assert-LocalTddPublishedDeployment -RepoRoot $RepoRoot -PublicationPath $PublicationPath -ReceiptPath $ReceiptPath
-        if (Test-LocalTddSmokeSuperseded $OutDir $result) { throw [OperationCanceledException]::new('PR head superseded while checking deployment.') }
+        if (Test-LocalTddSmokeSuperseded $SupersessionPath $result) { throw [OperationCanceledException]::new('PR head superseded while checking deployment.') }
         $attempt = Reserve-LocalTddRequest -AuthorizationPath $AuthorizationPath -BudgetPath $BudgetPath `
             -Head $result.head -RunId $result.runId
         $result.attemptId = $attempt.id
@@ -324,7 +324,7 @@ function Invoke-LocalTddRealAcceptance {
         & $definition.Submit $context | Out-Null
         $handled = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         do {
-            if (Test-LocalTddSmokeSuperseded $OutDir $result) { break }
+            if (Test-LocalTddSmokeSuperseded $SupersessionPath $result) { break }
             if ([DateTimeOffset]::UtcNow -gt $deadline) { throw 'The real request exceeded its authorized deadline.' }
             # Some providers create their event log only after the first submission.
             $events = @()
@@ -399,9 +399,9 @@ function Invoke-LocalTddRealAcceptance {
                     (Get-FileHash -LiteralPath $ScenarioPath).Hash -ne $result.scenarioSha256) {
                     throw 'Receipt or scenario changed during real acceptance.'
                 }
-                if ($result.status -ne 'passed' -or -not (Test-LocalTddSmokeSuperseded $OutDir $result)) {
+                if ($result.status -ne 'passed' -or -not (Test-LocalTddSmokeSuperseded $SupersessionPath $result)) {
                     $null = Assert-LocalTddPublishedDeployment -RepoRoot $RepoRoot -PublicationPath $PublicationPath -ReceiptPath $ReceiptPath
-                    if ($result.status -eq 'passed') { $null = Test-LocalTddSmokeSuperseded $OutDir $result }
+                    if ($result.status -eq 'passed') { $null = Test-LocalTddSmokeSuperseded $SupersessionPath $result }
                 }
             }
             catch {

@@ -158,114 +158,113 @@ function Clear-WtConfig {
 
 function Get-WtProcessesForApp {
     [CmdletBinding()] param([Parameter(Mandatory)]$App)
-    $loc = if ($App.InstallLocation) { [IO.Path]::GetFullPath([string]$App.InstallLocation).TrimEnd('\') + '\' } else { $null }
-    Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue | Where-Object {
-        try { $loc -and $_.Path -and [IO.Path]::GetFullPath($_.Path).StartsWith($loc, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    if (-not $App.InstallLocation) { throw 'Cannot identify the selected package installation.' }
+    $exe = [IO.Path]::GetFullPath((Join-Path $App.InstallLocation 'WindowsTerminal.exe'))
+    foreach ($process in @(Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue)) {
+        if (-not $process.Path) {
+            if ($process.HasExited) { continue }
+            throw "Cannot identify WindowsTerminal pid=$($process.Id)."
+        }
+        if ([string]::Equals($exe, $process.Path, [StringComparison]::OrdinalIgnoreCase)) { $process }
     }
 }
 
 function Get-RunningItProcesses {
-    [CmdletBinding()]
-    param()
+    [CmdletBinding()] param([Parameter(Mandatory)]$App)
+    Get-WtProcessesForApp -App $App
+}
 
-    $roots = @(Get-AppxPackage | Where-Object { $_.Name -like '*IntelligentTerminal*' } |
-            ForEach-Object {
-                if ($_.InstallLocation) {
-                    [IO.Path]::GetFullPath([string]$_.InstallLocation).TrimEnd('\') + '\'
-                }
-            } | Where-Object { $_ } | Select-Object -Unique)
-    if (-not $roots.Count) { return @() }
-
-    @(Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue | Where-Object {
-            try {
-                $path = if ($_.Path) { [IO.Path]::GetFullPath($_.Path) } else { $null }
-                $path -and @($roots | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count
-            }
-            catch { $false }
-        })
+function Stop-ItCapturedProcess {
+    param([Parameter(Mandatory)]$Process, [Parameter(Mandatory)][string]$ExpectedPath,
+          [Parameter(Mandatory)][datetime]$Created, [int]$GraceSec = 6)
+    if ($Process.HasExited) { return }
+    if ($Process.Path -ine $ExpectedPath -or $Process.StartTime -ne $Created) {
+        throw 'Refusing to close a process with a different executable or creation time.'
+    }
+    # Keep the original process handle through graceful and forced shutdown, not a recycled PID.
+    try { $null = $Process.Handle }
+    catch { if ($Process.HasExited) { return }; throw }
+    if ($Process.HasExited) { return }
+    [void]$Process.CloseMainWindow()
+    if (-not $Process.WaitForExit($GraceSec * 1000)) {
+        $Process.Kill()
+        if (-not $Process.WaitForExit(4000)) { throw "Process $($Process.Id) did not exit." }
+    }
 }
 
 function Stop-AppInstances {
-    <#
-    .SYNOPSIS
-        Force a COLD start by terminating every running WindowsTerminal of THIS package.
-    .DESCRIPTION
-        WT is single-instance: a launch hands off to an existing monarch instead of starting
-        fresh, and the monarch keeps `agentFreCompleted` (and the rest of ApplicationState)
-        cached in memory — it never re-reads state.json. So driving the FRE overlay, or any
-        test that depends on cold-start behaviour, requires no monarch to be alive first.
-        Closes gracefully (CloseMainWindow), then force-kills only the specific stragglers by
-        pid. ONLY ever targets this IT package's processes (filtered by install location) — it
-        never touches the user's stock Windows Terminal.
-    #>
     [CmdletBinding()] param([Parameter(Mandatory)]$App, [int]$GraceSec = 6)
-    $ids = @(Get-WtProcessesForApp -App $App | Select-Object -ExpandProperty Id)
-    if (-not $ids.Count) { return }
-    Write-ItLog -Level INFO -Message "Cold start: closing existing $($App.Package) instance(s) [$($ids -join ',')]"
-    foreach ($id in $ids) {
-        $p = Get-Process -Id $id -ErrorAction SilentlyContinue
-        if ($p) { try { $p.CloseMainWindow() | Out-Null } catch {} }
-    }
-    Test-Until -TimeoutSec $GraceSec -IntervalSec 0.5 -Condition {
-        -not @(Get-WtProcessesForApp -App $App).Count
-    } | Out-Null
-    # Force-kill any window-less / multi-window monarch that ignored CloseMainWindow.
-    foreach ($id in @(Get-WtProcessesForApp -App $App | Select-Object -ExpandProperty Id)) {
-        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
-        Write-ItLog -Level WARN -Message "Cold start: force-killed straggler pid=$id"
-    }
-    # Let the OS tear down the COM monarch registration before the next launch.
-    Start-Sleep -Milliseconds 500
+    Stop-StaleItInstances -App $App -GraceSec $GraceSec
 }
 
 function Stop-StaleItInstances {
-    <#
-    .SYNOPSIS
-        Close any leftover Intelligent Terminal windows (BOTH the store and dev packages)
-        before a test launches.
-    .DESCRIPTION
-        Called only after the user explicitly opts in through Start-Terminal
-        -CloseExistingInstances. It closes/kills Intelligent Terminal package processes by exact
-        install-location ownership. Stock Windows Terminal and the process hosting the current
-        shell are outside that boundary and must never be targeted by name.
-
-        Any IT window already running at launch is treated as a leftover from a previous test
-        whose AfterAll/Stop-Terminal didn't run (e.g. a BeforeAll that threw). Such a leftover
-        causes two real flakes:
-          * the single-instance AUMID launch hands off to the stale (often half-initialised)
-            window instead of starting fresh, so the harness attaches to a broken instance and
-            `new-tab` returns CreateTab E_FAIL (0x80004005);
-          * the store and dev packages share one per-brand COM CLSID, so a stale window of the
-            OTHER package steals wtcli's CoCreateInstance and misroutes every protocol call.
-        Closing all IT windows first makes each launch deterministic and freshly-owned.
-    #>
-    [CmdletBinding()] param([int]$GraceSec = 6)
-    $find = { Get-RunningItProcesses }
-    $procs = @(& $find)
-    if (-not $procs.Count) { return }
-    Write-ItLog -Level INFO -Message "Cleaning $($procs.Count) stale IT instance(s) before launch: [$(($procs | ForEach-Object Id) -join ',')]"
-    foreach ($p in $procs) { try { $p.CloseMainWindow() | Out-Null } catch {} }
-    Test-Until -TimeoutSec $GraceSec -IntervalSec 0.5 -Condition { -not @(& $find).Count } | Out-Null
-    foreach ($p in @(& $find)) {
-        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        Write-ItLog -Level WARN -Message "Force-killed stale IT straggler pid=$($p.Id)"
+    [CmdletBinding()] param([Parameter(Mandatory)]$App, [int]$GraceSec = 6)
+    $processes = @(Get-WtProcessesForApp -App $App)
+    if (-not $processes.Count) { return }
+    if ($App.Package -cne $script:ItKnownFamilies.Dev) {
+        throw 'Existing Store or private package processes are not test-owned. Leave them running.'
     }
-    Start-Sleep -Milliseconds 500   # let the OS tear down the shared COM monarch registration
+    $id = $PID
+    $seen = [Collections.Generic.HashSet[int]]::new()
+    while ($id -gt 0) {
+        if (-not $seen.Add($id) -or $id -in $processes.Id) { throw 'Refusing to close the current process ancestry.' }
+        $entry = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction Stop
+        if (-not $entry) { throw "Cannot verify current process ancestry at pid=$id." }
+        $id = [int]$entry.ParentProcessId
+    }
+    $exe = Join-Path $App.InstallLocation 'WindowsTerminal.exe'
+    foreach ($process in $processes) {
+        Stop-ItCapturedProcess -Process $process -ExpectedPath $exe -Created $process.StartTime -GraceSec $GraceSec
+    }
 }
 
 function Get-ItTestPackage {
     <#
     .SYNOPSIS
         Resolve which package selector the feature/self-test suites should launch.
-        Honors the ITE2E_PACKAGE env var (Auto|Store|Dev|<PackageFamilyName>); defaults
-        to 'Auto', which prefers a fully-resolvable Store install and falls back to Dev.
+        Requires an explicit Store, Dev or package family name in ITE2E_PACKAGE.
         This is the single knob that lets the suites run against a dev-only machine
         (where only the sideload package is installed) without editing each Describe.
     #>
     [CmdletBinding()]
     param()
-    if ($env:ITE2E_PACKAGE) { return $env:ITE2E_PACKAGE }
-    return 'Auto'
+    if ([string]::IsNullOrWhiteSpace($env:ITE2E_PACKAGE) -or $env:ITE2E_PACKAGE -eq 'Auto') {
+        throw 'Choose an explicit live test package with ITE2E_PACKAGE or -Package.'
+    }
+    return $env:ITE2E_PACKAGE
+}
+
+function Start-ItPackageProcess {
+    param([Parameter(Mandatory)]$App)
+    if ($App.AppUserModelId -cne "$($App.Package)!App") { throw 'Unexpected Terminal application identity.' }
+    if (-not ('ItE2E.PackageActivation' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace ItE2E {
+    public static class PackageActivation {
+        [ComImport, Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IManager {
+            void ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string id,
+                [MarshalAs(UnmanagedType.LPWStr)] string args, uint options, out int pid);
+        }
+        public static int Open(string id) {
+            var manager = (IManager)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")));
+            try { int pid; manager.ActivateApplication(id, "-w new", 2, out pid); return pid; }
+            finally { Marshal.ReleaseComObject(manager); }
+        }
+    }
+}
+'@
+    }
+    $start = [DateTime]::UtcNow
+    $id = [ItE2E.PackageActivation]::Open($App.AppUserModelId)
+    $process = Get-Process -Id $id -ErrorAction Stop
+    $null = $process.Handle
+    if ($process.HasExited -or $process.Path -ine $App.WindowsTerminal -or $process.StartTime.ToUniversalTime() -lt $start) {
+        throw 'Package activation did not create the expected Terminal process; refusing to attach.'
+    }
+    return $process
 }
 
 function Start-Terminal {
@@ -273,7 +272,7 @@ function Start-Terminal {
     .SYNOPSIS
         Resolve, (optionally) configure, launch, and attach to a deployed Intelligent
         Terminal. Returns the app context object used by every primitive.
-    .PARAMETER Package   Auto|Store|Dev|<PackageFamilyName>
+    .PARAMETER Package   Store|Dev|<PackageFamilyName>
     .PARAMETER Settings  Hashtable of top-level settings.json keys to apply.
     .PARAMETER PassFre   Mark the agent FRE complete before launch (default $true).
     .PARAMETER Backup    Back up settings/state for restore on Stop-Terminal (default $true).
@@ -286,12 +285,12 @@ function Start-Terminal {
                          started (see Stop-StaleItInstances below), which is what lets the FRE
                          re-read state.json — a running monarch caches ApplicationState.
     .PARAMETER CloseExistingInstances
-        Explicitly allow the harness to close exact Intelligent Terminal package processes before
-        launch. Without this switch, any existing Intelligent Terminal process is a hard failure.
+        Allow closure only of the selected ordinary Dev package. Active private
+        and Store targets are refused; unrelated packages are never closed.
     #>
     [CmdletBinding()]
     param(
-        [string]$Package = 'Auto',
+        [string]$Package = (Get-ItTestPackage),
         [hashtable]$Settings,
         [bool]$PassFre = $true,
         [bool]$Backup = $true,
@@ -307,20 +306,22 @@ function Start-Terminal {
 
     $script:ItE2ELogFile = Get-ItArtifactPath -ChildPath ("logs\ite2e-{0}-{1}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N')) -CreateParent
 
-    $existing = @()
+    $proc = $null
+    $created = $null
+    $backupStarted = $false
     $inputLease = $null
     try {
     $inputLease = Enter-ItForegroundInputLease -TimeoutSec $InputLeaseTimeoutSec
     $app | Add-Member -NotePropertyName ForegroundInputLease -NotePropertyValue $inputLease -Force
-    $runningIt = @(Get-RunningItProcesses)
+    $runningIt = @(Get-WtProcessesForApp -App $app)
     if ($runningIt.Count) {
-        if (-not $CloseExistingInstances) {
-            throw "Intelligent Terminal is already running (pid(s): $(($runningIt.Id) -join ', ')). Re-run with -CloseExistingInstances to allow exact package-owned processes to be closed."
+        if ($app.Package -cne $script:ItKnownFamilies.Dev -or -not $CloseExistingInstances) {
+            throw "Selected package is already running; leave it untouched. -CloseExistingInstances applies only to explicitly owned ordinary Dev windows."
         }
-        Stop-StaleItInstances
+        Stop-StaleItInstances -App $app
     }
 
-    if ($Backup) { Backup-WtConfig -App $app }
+    if ($Backup) { $backupStarted = $true; Backup-WtConfig -App $app }
     # Strip agent/AI keys from settings.json so the user's real config (e.g. a Foundry
     # acpModel/acpBaseUrl set for acpAgent=native) cannot leak into a test that only patches a
     # subset of keys. Requires a backup so Stop-Terminal can restore the real settings.
@@ -355,37 +356,12 @@ function Start-Terminal {
     $app | Add-Member -NotePropertyName PreExistingAgentPaneIds -NotePropertyValue $preIds -Force
     Write-ItLog -Level INFO -Message "Snapshotted $($preIds.Count) pre-existing agent-pane id(s) before launch."
 
-    $existing = @(Get-WtProcessesForApp -App $app | Select-Object -ExpandProperty Id)
-    # Launch via AUMID shell activation — this is package-specific by construction
-    # (shell:AppsFolder\<PackageFamilyName>!App) and therefore launches EXACTLY the
-    # target package. The global `wtai` AppExecutionAlias is owned by only one package,
-    # so when both the store and a dev/sideloaded IT build are installed it is ambiguous
-    # and would launch the wrong one (silently timing out the dev-targeted tests). The
-    # earlier crash-on-AUMID-activation was the state.json corruption bug (now fixed via
-    # the unary-comma ConvertFrom-ItJsonElement change), not the activation method.
-    if ($app.AppUserModelId) {
-        Write-ItLog -Level INFO -Message "Launching via AUMID: $($app.AppUserModelId)"
-        Start-Process -FilePath 'explorer.exe' -ArgumentList "shell:AppsFolder\$($app.AppUserModelId)" | Out-Null
-    }
-    elseif ($app.LaunchAlias -and (Test-Path $app.LaunchAlias)) {
-        Write-ItLog -Level WARN -Message "No AUMID; falling back to wtai alias ($($app.LaunchAlias)) — may be ambiguous across packages."
-        Start-Process -FilePath $app.LaunchAlias | Out-Null
-    }
-
-    # Find our WindowsTerminal.exe process (prefer a newly-spawned pid).
-    $proc = Wait-Until -TimeoutSec $TimeoutSec -IntervalSec 1 -Because "WindowsTerminal process for $($app.Package)" -Condition {
-        $ps = Get-WtProcessesForApp -App $app
-        $new = $ps | Where-Object { $_.Id -notin $existing } | Select-Object -First 1
-        if ($new) { $new } elseif ($ps) { $ps | Select-Object -First 1 } else { $null }
-    }
+    if (@(Get-WtProcessesForApp -App $app).Count) { throw 'Selected package became active before launch.' }
+    $proc = Start-ItPackageProcess -App $app
     $app.Pid = $proc.Id
-    # Track whether WE launched this process or merely attached to a pre-existing one
-    # (WT is single-instance — a launch can join an already-running window). Stop-Terminal
-    # only kills processes we launched, so it never terminates a user's existing terminal.
-    $app | Add-Member -NotePropertyName Launched -NotePropertyValue ($app.Pid -notin $existing) -Force
-    if (-not $app.Launched) {
-        Write-ItLog -Level WARN -Message "Attached to a pre-existing WindowsTerminal (pid=$($app.Pid)); Stop-Terminal will NOT kill it."
-    }
+    $created = $proc.StartTime
+    $app | Add-Member -NotePropertyName Created -NotePropertyValue $created -Force
+    $app | Add-Member -NotePropertyName Launched -NotePropertyValue $true -Force
     Write-ItLog -Level INFO -Message "WindowsTerminal pid=$($app.Pid) launched=$($app.Launched)"
 
     # Wait until shell activation has created the first real window before probing COM.
@@ -425,20 +401,16 @@ function Start-Terminal {
     }
     catch {
         $startupError = $_
-        # Stop only package processes that appeared after this invocation's baseline. This also
-        # covers failures before the app context is returned to a caller's AfterAll block.
-        $started = @(Get-WtProcessesForApp -App $app | Where-Object { $_.Id -notin $existing })
-        foreach ($process in $started) { try { [void]$process.CloseMainWindow() } catch {} }
-        if ($started) {
-            [void](Test-Until -TimeoutSec 4 -IntervalSec 0.2 -Condition {
-                    -not @($started | Where-Object { Get-Process -Id $_.Id -ErrorAction SilentlyContinue }).Count
-                })
+        try {
+            if ($proc -and $created) {
+                Stop-ItCapturedProcess -Process $proc -ExpectedPath $app.WindowsTerminal -Created $created
+            }
+            if ($backupStarted) {
+                if (@(Get-WtProcessesForApp -App $app).Count) { throw 'Target is active; keeping configuration backups for recovery.' }
+                Restore-WtConfig -App $app
+            }
         }
-        foreach ($process in $started) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        }
-        if ($Backup) { Restore-WtConfig -App $app }
-        Exit-ItForegroundInputLease -Lease $inputLease
+        finally { Exit-ItForegroundInputLease -Lease $inputLease }
         throw $startupError
     }
 }
@@ -463,48 +435,30 @@ function Stop-Terminal {
     )
     process {
         try {
-        # Only tear down processes WE launched. If Start-Terminal attached to a pre-existing
-        # WindowsTerminal (single-instance), leave it (and its wta) alone.
-        if ($App.PSObject.Properties.Name -contains 'Launched' -and -not $App.Launched) {
-            Write-ItLog -Level WARN -Message "Stop-Terminal: not killing pre-existing WindowsTerminal (pid=$($App.Pid))."
-            if ($RestoreSettings) { Restore-WtConfig -App $App }
-            return
+        if (-not $App.Launched -or -not $App.Created -or -not $App.Pid) {
+            throw 'Cannot tear down a window without a captured launch identity.'
         }
-        # Collect OUR wta descendants before WT exits (parent links vanish afterwards).
-        $wtaIds = if ($App.Pid) { @(Get-DescendantWtaIds -RootPid ([int]$App.Pid)) } else { @() }
-
-        $forced = $false
-        if ($App.Pid) {
-            $proc = Get-Process -Id $App.Pid -ErrorAction SilentlyContinue
-            if ($proc) {
-                # 1) Graceful close: post WM_CLOSE to the main window so WindowEmperor runs
-                #    its normal shutdown (deregisters COM monarch / protocol server cleanly).
-                $closed = $false
-                try { $closed = $proc.CloseMainWindow() } catch { }
-                if ($closed -or $proc.MainWindowHandle -eq 0) {
-                    $closed = Test-Until -TimeoutSec $GraceSec -IntervalSec 0.5 -Condition {
-                        $null -eq (Get-Process -Id $App.Pid -ErrorAction SilentlyContinue)
-                    }
+        $proc = Get-Process -Id $App.Pid -ErrorAction SilentlyContinue
+        if ($proc) {
+            if ($proc.Path -ine $App.WindowsTerminal -or $proc.StartTime -ne $App.Created) {
+                throw 'Refusing teardown: captured Terminal process identity changed.'
+            }
+            $wtaPath = Join-Path $App.InstallLocation 'wta.exe'
+            $helpers = @(foreach ($id in @(Get-DescendantWtaIds -RootPid $proc.Id)) {
+                $child = Get-Process -Id $id -ErrorAction SilentlyContinue
+                if ($child -and $child.Path -ieq $wtaPath -and $child.StartTime -ge $App.Created) {
+                    @{ Process = $child; Created = $child.StartTime }
                 }
-                # 2) Fallback: force-kill only if it did not exit gracefully in time.
-                if (-not (Get-Process -Id $App.Pid -ErrorAction SilentlyContinue)) {
-                    Write-ItLog -Level INFO -Message "Terminal closed gracefully (pid=$($App.Pid))."
-                }
-                else {
-                    Write-ItLog -Level WARN -Message "Graceful close timed out after ${GraceSec}s; force-killing pid=$($App.Pid)."
-                    Stop-Process -Id $App.Pid -Force -ErrorAction SilentlyContinue
-                    $forced = $true
-                }
+            })
+            Stop-ItCapturedProcess -Process $proc -ExpectedPath $App.WindowsTerminal -Created $App.Created -GraceSec $GraceSec
+            foreach ($helper in $helpers) {
+                if (-not $helper.Process.HasExited) { Stop-ItCapturedProcess @helper -ExpectedPath $wtaPath -GraceSec $GraceSec }
             }
         }
-
-        # Reap any of OUR wta helpers/master still alive (they normally exit with their helper
-        # conpty once WT closes; force only the stragglers, never every wta on the machine).
-        $alive = @($wtaIds | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
-        if ($alive.Count) { Stop-Process -Id $alive -Force -ErrorAction SilentlyContinue }
-
-        if ($RestoreSettings) { Restore-WtConfig -App $App }
-        Write-ItLog -Level INFO -Message "Terminal stopped (pid=$($App.Pid), graceful=$(-not $forced), wta reaped=$($alive.Count))."
+        if ($RestoreSettings) {
+            if (@(Get-WtProcessesForApp -App $App).Count) { throw 'Target is active; keeping configuration backups for recovery.' }
+            Restore-WtConfig -App $App
+        }
         }
         finally {
             if ($App.PSObject.Properties.Name -contains 'ForegroundInputLease') {

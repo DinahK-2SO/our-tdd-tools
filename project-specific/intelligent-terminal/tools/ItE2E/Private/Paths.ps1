@@ -1,5 +1,6 @@
 # Paths.ps1 — resolve the deployed app, its binaries, data files, and COM CLSID.
 # This is the brick that pins WHICH package we test and HOW to reach it.
+. (Join-Path $PSScriptRoot '..\..\DevTarget.ps1')
 
 # Fixed per-brand COM CLSIDs (src/cascadia/WindowsTerminal/TerminalProtocolComServer.h:19-27).
 # wtcli's CLSIDFromString requires the canonical braced form WT sets in WT_COM_CLSID.
@@ -41,14 +42,13 @@ function Resolve-ItApp {
         Build the immutable app descriptor used by every primitive: package identity,
         binaries (wtcli/wta/WindowsTerminal), data files (settings/state), log root.
     .PARAMETER Package
-        'Auto' (prefer a fully-resolvable Store install, else Dev), 'Store', 'Dev',
-        or an explicit PackageFamilyName.
+        'Store', 'Dev', or an explicitly selected Intelligent Terminal package family.
     #>
     [CmdletBinding()]
-    param([string]$Package = 'Auto')
+    param([string]$Package = (Get-ItTestPackage))
 
+    if ([string]::IsNullOrWhiteSpace($Package) -or $Package -eq 'Auto') { throw 'Choose an explicit live test package.' }
     $candidates = switch ($Package) {
-        'Auto' { @($script:ItKnownFamilies.Store, $script:ItKnownFamilies.Dev) }
         'Store' { @($script:ItKnownFamilies.Store) }
         'Dev' { @($script:ItKnownFamilies.Dev) }
         default { @($Package) }
@@ -65,36 +65,32 @@ function Resolve-ItApp {
     }
     if (-not $pkg) { throw "No Intelligent Terminal package found for selector '$Package'. Install one first." }
 
+    if ($pkg.Name -notlike '*IntelligentTerminal*' -or -not $pkg.InstallLocation) {
+        throw 'Selected package is not an installed Intelligent Terminal target.'
+    }
     $install = $pkg.InstallLocation
-    $aumid = (Get-StartApps | Where-Object AppID -like "$pfn!*" | Select-Object -First 1 -ExpandProperty AppID)
-    if (-not $aumid) { $aumid = "$pfn!App" }
+    $private = $pkg.Name -like 'IntelligentTerminal.Worktree.*'
+    if ($private) {
+        $privateClsid = Get-ItPrivateProtocolClsid -Package $pkg
+        if ($env:ITE2E_WT_COM_CLSID -and [guid]$env:ITE2E_WT_COM_CLSID -ne [guid]$privateClsid) {
+            throw 'The COM override conflicts with the registered private package.'
+        }
+    }
+    $aumid = "$pfn!App"
 
     # Binaries: prefer co-located (have package identity, readable for Store).
-    $wtcli = if ($install -and (Test-Path (Join-Path $install 'wtcli.exe'))) { Join-Path $install 'wtcli.exe' }
-    else { (Get-Command wtcli -ErrorAction SilentlyContinue).Source }
-    $wt = if ($install -and (Test-Path (Join-Path $install 'WindowsTerminal.exe'))) { Join-Path $install 'WindowsTerminal.exe' } else { $null }
-
-    $wta = $null
-    if ($install -and (Test-Path (Join-Path $install 'wta.exe'))) { $wta = Join-Path $install 'wta.exe' }
-    else {
-        $repo = Get-ItRepoRoot
-        if ($repo) {
-            foreach ($rel in @('tools\wta\target\x86_64-pc-windows-msvc\debug\wta.exe', 'tools\wta\target\debug\wta.exe')) {
-                $cand = Join-Path $repo $rel
-                if (Test-Path $cand) { $wta = $cand; break }
-            }
-        }
+    $wtcli = Join-Path $install 'wtcli.exe'
+    $wt = Join-Path $install 'WindowsTerminal.exe'
+    $wta = Join-Path $install 'wta.exe'
+    foreach ($file in $wtcli, $wt, $wta) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing selected package executable: $file" }
     }
 
     $localState = Join-Path $env:LOCALAPPDATA "Packages\$pfn\LocalState"
     $logRoot = Join-Path $env:LOCALAPPDATA "Packages\$pfn\LocalCache\Local\IntelligentTerminal\logs"
 
-    # Launch entry point: tests activate via AUMID (shell:AppsFolder\<PFN>!App),
-    # which is package-specific and therefore reliably hits THIS package even when
-    # both the Store and a Dev build are installed (see Start-Terminal). The global
-    # `wtai` AppExecutionAlias is owned by a single package, so it is ambiguous in
-    # that scenario — it is kept here only as a last-resort fallback.
-    $launchAlias = (Get-Command 'wtai' -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    $aliasName = if ($private) { 'wtai-' + $pkg.Name.Substring('IntelligentTerminal.Worktree.'.Length) + '.exe' } else { 'wtai.exe' }
+    $launchAlias = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\$pfn\$aliasName"
 
     [pscustomobject]@{
         Package          = $pfn
@@ -110,7 +106,8 @@ function Resolve-ItApp {
         StatePath        = Join-Path $localState 'state.json'
         LocalStateDir    = $localState
         LogRootDir       = $logRoot
-        ComClsid         = $null   # filled by Resolve-WtComClsid once WT is running
+        PrivateProtocolClsid = if ($private) { $privateClsid } else { $null }
+        ComClsid         = $null
         Hwnd             = $null   # filled by harness after launch
         Pid              = $null
         LogStartOffset   = @{}     # per-file byte offset captured at test start
@@ -176,6 +173,12 @@ function Resolve-WtComClsid {
             throw 'The COM override must be a non-empty GUID.'
         }
         $override = $parsed.ToString('B')
+    }
+    if ($App.PSObject.Properties.Name -contains 'PrivateProtocolClsid' -and $App.PrivateProtocolClsid) {
+        $private = [guid]$App.PrivateProtocolClsid
+        if ($override -and $parsed -ne $private) { throw 'The COM override conflicts with the registered private package.' }
+        $parsed = $private
+        $override = $private.ToString('B')
     }
     if ($App.ComClsid) {
         if ($override) {

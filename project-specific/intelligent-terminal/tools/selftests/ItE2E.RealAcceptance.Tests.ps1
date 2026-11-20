@@ -184,6 +184,62 @@ Describe 'Real acceptance orchestration without inference' -Tag 'Unit', 'RealAcc
     }
 }
 
+Describe 'Local publisher handoff' -Tag 'Unit', 'RealAcceptance' {
+    It 'dispatches the latest remote SHA once and supersedes the older run without inference' {
+        $root = Join-Path $TestDrive 'publish-handoff'
+        $fixtureRemote = Join-Path $root 'remote.git'
+        $src = Join-Path $root 'source'
+        [void](New-Item -ItemType Directory -Path $root)
+        git init -q --bare $fixtureRemote
+        git init -q -b publish $src
+        git -C $src remote add origin $fixtureRemote
+        git -C $src -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m A
+        $first = git -C $src rev-parse HEAD
+        git -C $src push -q origin HEAD:refs/heads/publish
+        function gh {
+            $row = git ls-remote $fixtureRemote refs/heads/publish
+            @{state='OPEN'; headRefOid=($row -split '\s+')[0]} | ConvertTo-Json -Compress
+        }
+        $record = Join-Path $root 'publication.json'
+        $publication = @{repository='fixture/terminal'; pullRequest=1; branch='publish'; remote='origin'; head=$first}
+        $publication | ConvertTo-Json | Set-Content $record
+        $entry = Join-Path $PSScriptRoot '..\Invoke-LocalTddPublishedSmoke.ps1'
+        $pipeline = Join-Path $root 'pipeline.ps1'
+        $real = Join-Path $root 'real.ps1'
+        @'
+param($RepoRoot,$ExpectedHead,$PublicationPath,[switch]$WtaOnly,$NativeReceiptPath,$OutDir,$ReceiptPath)
+[IO.File]::AppendAllText((Join-Path $RepoRoot '..\builds'), "$ExpectedHead`n")
+@{status='passed'; gitHead=(git -C $RepoRoot rev-parse HEAD); receiptPath=$ReceiptPath}
+'@ | Set-Content $pipeline
+        @'
+param([switch]$AllowRealInference,$RepoRoot,$ReceiptPath,$PublicationPath,$AuthorizationPath,$BudgetPath,$ScenarioPath,$OutDir,$SupersessionPath)
+$p = Get-Content $PublicationPath -Raw | ConvertFrom-Json
+if ($p.head -eq $first) {
+    git -C $RepoRoot -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m B
+    git -C $RepoRoot push -q origin HEAD:refs/heads/publish
+    $next = git -C $RepoRoot rev-parse HEAD
+    $p.head = $next
+    $p | ConvertTo-Json | Set-Content $record
+    $new = & $entry @dispatch
+    if ($new.status -ne 'passed' -or (Get-Content $SupersessionPath -Raw).Trim() -ne $next) { throw 'New head did not take ownership.' }
+    return @{head=$first;status='superseded'}
+}
+@{head=$p.head;status='passed'}
+'@ | Set-Content $real
+        $authorization = Join-Path $root 'fixture-budget.json'
+        @{schemaVersion=1; approved=$true; scope='offline-fixture'; totalLimit=2; perHeadLimit=1; timeoutSeconds=5} |
+            ConvertTo-Json | Set-Content $authorization
+        $dispatch = @{RepoRoot=$src; PublicationPath=$record; NativeReceiptPath='fixture-native'; StateRoot=(Join-Path $root 'state')
+            AuthorizationPath=$authorization; BudgetPath='fixture-ledger'; AllowRealInference=$true; PipelineScript=$pipeline; RealScript=$real}
+        $old = & $entry @dispatch
+        $old.status | Should -Be 'superseded'
+        $latest = & $entry @dispatch
+        $latest.status | Should -Be 'passed'
+        $latest.head | Should -Be (git -C $src rev-parse HEAD)
+        @(Get-Content (Join-Path $root 'builds')) | Should -Be @($first,$latest.head)
+    }
+}
+
 Describe 'Reference callback import scope' -Tag 'Unit', 'RealAcceptance' {
     It 'makes imported helpers available to nested configuration-verification closures' {
         $repo = Join-Path $TestDrive 'callback-repo'
@@ -195,6 +251,7 @@ Describe 'Reference callback import scope' -Tag 'Unit', 'RealAcceptance' {
 function Get-FixtureScopeValue { 'scope-value' }
 function Resolve-ItApp {
     param($Package)
+    if ($Package -cne 'IntelligentTerminal.Worktree.fixture_rd9vj3e6a2mbr') { throw 'Wrong scenario package.' }
     $probe = { Get-FixtureScopeValue }.GetNewClosure()
     if ((& $probe) -ne 'scope-value') { throw 'Nested helper lookup failed.' }
     throw 'fixture-scope-reached'
@@ -209,7 +266,7 @@ $ErrorActionPreference = 'Stop'
 $module = New-Module -ScriptBlock {
     function Invoke-Probe($Scenario, $Repo) {
         $definition = & $Scenario
-        & $definition.Prepare @{ repoRoot = $Repo; state = @{} }
+        & $definition.Prepare @{ repoRoot = $Repo; receipt = @{ packageFamily = 'IntelligentTerminal.Worktree.fixture_rd9vj3e6a2mbr' }; state = @{} }
     }
 }
 try {

@@ -65,6 +65,11 @@ Release test-owned deployment/UI resources before reusing them; never stop a
 user app or refund a spent request. On completion, recheck both remote heads
 before crediting a result. Only the current SHA can satisfy acceptance.
 The Terminal toolbox's `TDD-WORKFLOW.template.md` describes the runner and handoff.
+After each successful open/push invoke `Invoke-LocalTddPublishedSmoke.ps1`
+from the dev toolbox, with the clean publish checkout, immutable publication
+record, private native receipt, a shared per-task state root and approved budget.
+Run it alongside review. It signals the prior in-flight head and verifies the
+remote head again before accepting the new result.
 
 ## Ownership
 

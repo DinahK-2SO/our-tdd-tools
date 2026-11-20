@@ -764,6 +764,26 @@ Describe 'broken setup' -Tag Unit {
 }
 
 Describe 'Durable local TDD pipeline state' -Tag 'Unit' {
+    It 'rejects a stale published head before invoking the build or touching its receipt' {
+        $branch = 'refs/heads/owned-head-fixture'
+        $remote = Join-Path $TestDrive 'origin.git'
+        git init -q --bare $remote
+        $source = Join-Path $TestDrive 'clean-publish'
+        git init -q -b owned-head-fixture $source
+        git -C $source remote add origin $remote
+        git -C $source -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m A
+        $head = git -C $source rev-parse HEAD
+        git -C $source -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m B
+        git -C $source push -q origin "HEAD:$branch"
+        git -C $source switch -q --detach $head
+        $publication = Join-Path $TestDrive 'publication.json'
+        @{ head=$head; branch='owned-head-fixture'; remote='origin'; repository='fixture/project'; pullRequest=1 } |
+            ConvertTo-Json | Set-Content $publication
+        { & $script:pipelineScript -RepoRoot $source -PublicationPath $publication -BuildScript $script:fakeBuild -OutDir $script:runDir } |
+            Should -Throw '*Remote publish HEAD differs*'
+        Test-Path $script:buildLog | Should -BeFalse
+    }
+
     BeforeEach {
         $script:repoRoot = (& git -C $PSScriptRoot rev-parse --show-toplevel).Trim()
         $script:head = (& git -C $script:repoRoot rev-parse HEAD).Trim()
@@ -865,6 +885,44 @@ Copy-Item -LiteralPath '$packageSourceLiteral' -Destination (Join-Path '$appxLit
         $status = & $script:pipelineStatusScript -JournalPath (Join-Path $script:runDir 'pipeline-state.json') -RequirePassed
         $status.ObservedStatus | Should -Be 'passed'
         @(Get-ChildItem -LiteralPath $script:runDir -Filter '*.tmp').Count | Should -Be 0
+    }
+
+    It 'builds the selected publish checkout for its private Dev family and refuses a superseded SHA' {
+        $source = Join-Path $script:caseDir 'publish'
+        git init -q -b main $source
+        git -C $source -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m A
+        $old = git -C $source rev-parse HEAD
+        git -C $source -c user.name=Fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m B
+        $current = git -C $source rev-parse HEAD
+        $family = 'IntelligentTerminal.Worktree.fixture_rd9vj3e6a2mbr'
+        $argsForRun = @{
+            RepoRoot=$source; PackageSelector=$family; ReceiptPath=$script:receipt
+            OutDir=$script:runDir; WtaOnly=$true; NativeReceiptPath=$script:receipt
+        }
+        '{}' | Set-Content $script:receipt
+        $runner = Join-Path $script:caseDir 'record-refresh.ps1'
+        @'
+param($RepoRoot,$NativeReceiptPath,$Configuration,$OutDir,$PackageSelector,$ExpectedHead)
+$kit = $env:IT_TEST_FINGERPRINT
+$fp = & $kit -RepoRoot $RepoRoot -SourcePaths src
+if ($fp.Head -ne $ExpectedHead) { throw 'Wrong build source.' }
+New-Item -ItemType Directory -Path $OutDir | Out-Null
+$path = Join-Path $OutDir 'build-receipt.json'
+@{ gitHead=$fp.Head; createdUtc=[DateTimeOffset]::UtcNow.ToString('o'); sourceFingerprint=$fp.Fingerprint
+   sourcePaths=@('src'); packageFamily=$PackageSelector; installVerified=$true } | ConvertTo-Json | Set-Content $path
+@{status='passed'; receiptPath=$path}
+'@ | Set-Content $runner
+        $argsForRun.WtaRefreshScript = $runner
+        $prior = $env:IT_TEST_FINGERPRINT
+        try {
+            $env:IT_TEST_FINGERPRINT = $script:fingerprintScript
+            { & $script:pipelineScript @argsForRun -ExpectedHead $old } | Should -Throw '*expected*head*'
+            (Get-Content $script:receipt -Raw).Trim() | Should -Be '{}'
+            $run = & $script:pipelineScript @argsForRun -ExpectedHead $current
+            $run.gitHead | Should -Be $current
+            $run.repoRoot | Should -Be $source
+            $run.packageSelector | Should -Be $family
+        } finally { $env:IT_TEST_FINGERPRINT = $prior }
     }
 
     It 'dispatches WTA-only refresh without invoking full deployment' {

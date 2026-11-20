@@ -22,7 +22,10 @@ param(
     [string[]]$SourcePaths,
     [string[]]$E2EPath,
     [string[]]$E2ETag,
-    [ValidateSet('Dev')][string]$PackageSelector = 'Dev',
+    [string]$PackageSelector = 'Dev',
+    [string]$RepoRoot,
+    [string]$PublicationPath,
+    [ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ExpectedHead,
     [string]$OutDir,
     [string]$E2ERunner = (Join-Path $PSScriptRoot 'Invoke-LocalTddReport.ps1'),
     [Parameter(DontShow)][string]$BuildScript = (Join-Path $PSScriptRoot 'Invoke-BuildDeploy.ps1'),
@@ -34,10 +37,37 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $kitRoot = $PSScriptRoot
-$repoRoot = (& git -C $kitRoot rev-parse --show-toplevel).Trim()
+. (Join-Path $kitRoot 'DevTarget.ps1')
+if ($PublicationPath) {
+    $publication = Get-Content -LiteralPath $PublicationPath -Raw | ConvertFrom-Json -AsHashtable
+    if (-not $RepoRoot -or $publication.head -notmatch '^[a-fA-F0-9]{40}$' -or ($ExpectedHead -and $ExpectedHead -ne $publication.head)) {
+        throw 'Published verification requires an explicit source checkout and the expected publication head.'
+    }
+    $ExpectedHead = $publication.head
+    if ($publication.Contains('packageFamily')) {
+        if ($PSBoundParameters.ContainsKey('PackageSelector') -and (Resolve-LocalTddDevFamily $PackageSelector) -cne $publication.packageFamily) {
+            throw 'Selected Dev target differs from the publication record.'
+        }
+        $PackageSelector = $publication.packageFamily
+    }
+}
+$family = Resolve-LocalTddDevFamily $PackageSelector
+$explicitRoot = $PSBoundParameters.ContainsKey('RepoRoot')
+if (-not $RepoRoot) { $RepoRoot = $kitRoot }
+$repoRoot = [IO.Path]::GetFullPath((& git -C $RepoRoot rev-parse --show-toplevel).Trim())
 if ($LASTEXITCODE -ne 0 -or -not $repoRoot) { throw 'Unable to resolve the repository root.' }
 $head = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[a-f0-9]{40}$') { throw 'Unable to resolve the exact Git HEAD.' }
+if ($ExpectedHead -and $head -ne $ExpectedHead) { throw "Expected PR head $ExpectedHead, found $head." }
+if ($ExpectedHead -and @(git -C $repoRoot status --porcelain).Count) { throw 'Published source checkout is not clean.' }
+function Assert-PipelinePublishedHead {
+    if (-not $PublicationPath) { return }
+    Assert-LocalTddRemoteHead -RepoRoot $repoRoot -Publication $publication -ExpectedHead $ExpectedHead
+}
+Assert-PipelinePublishedHead
+if ($family -like 'IntelligentTerminal.Worktree.*' -and -not $WtaOnly) {
+    throw 'For an isolated Dev target, prepare its verified native build receipt and use -WtaOnly. The ordinary full deployment must not replace another registration.'
+}
 
 if ($E2EPath -and $SkipDeploy) {
     throw 'Packaged E2E cannot run with -SkipDeploy.'
@@ -76,7 +106,7 @@ if (Test-Path -LiteralPath $OutDir -PathType Container) {
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $journalPath = Join-Path $OutDir 'pipeline-state.json'
-$lockPath = Join-Path $kitRoot 'artifacts\pipeline.lock'
+$lockPath = if ($PublicationPath) { Join-Path $OutDir 'pipeline.lock' } else { Join-Path $kitRoot 'artifacts\pipeline.lock' }
 New-Item -ItemType Directory -Force -Path (Split-Path $lockPath -Parent) | Out-Null
 
 try {
@@ -207,13 +237,11 @@ try {
     Invoke-PipelinePhase -Name 'preflight' -Action {
         $current = (& git -C $repoRoot rev-parse HEAD).Trim()
         if ($current -ne $head) { throw "HEAD changed before the pipeline started: $head -> $current" }
-        if ($E2EPath -and $PackageSelector -ne 'Dev') {
-            throw 'Exact local package evidence requires PackageSelector=Dev.'
-        }
     }
 
     $buildStartedUtc = [DateTimeOffset]::UtcNow
     Invoke-PipelinePhase -Name 'build-deploy-freshness' -Action {
+        Assert-PipelinePublishedHead
         if (Test-Path -LiteralPath $ReceiptPath -PathType Leaf) {
             Move-Item -LiteralPath $ReceiptPath -Destination (Join-Path $OutDir 'prior-build-receipt.json') -Force
             if ($WtaOnly -and $NativeReceiptPath -ieq $ReceiptPath) {
@@ -221,6 +249,9 @@ try {
             }
         }
         $buildArgs = @{ Configuration = $Configuration }
+        if ($explicitRoot) { $buildArgs.RepoRoot = $repoRoot }
+        if ($ExpectedHead) { $buildArgs.ExpectedHead = $ExpectedHead }
+        if ($PublicationPath) { $buildArgs.PublicationPath = $PublicationPath }
         if ($SkipWtaTests) { $buildArgs.SkipWtaTests = $true }
         if ($SkipDeploy) { $buildArgs.SkipDeploy = $true }
         if ($ReplaceExistingDevRegistration) { $buildArgs.ReplaceExistingDevRegistration = $true }
@@ -234,6 +265,11 @@ try {
                 OutDir = (Join-Path $OutDir 'wta-refresh'); Configuration = $Configuration
             }
             if ($SkipWtaTests) { $refreshArgs.SkipWtaTests = $true }
+            if ($ExpectedHead) { $refreshArgs.ExpectedHead = $ExpectedHead }
+            if ($PublicationPath) { $refreshArgs.PublicationPath = $PublicationPath }
+            if ($PSBoundParameters.ContainsKey('PackageSelector') -or $family -like 'IntelligentTerminal.Worktree.*') {
+                $refreshArgs.PackageSelector = $PackageSelector
+            }
             $refresh = & $WtaRefreshScript @refreshArgs
             if ($refresh.status -ne 'passed' -or -not (Test-Path -LiteralPath $refresh.receiptPath -PathType Leaf)) {
                 throw 'WTA refresh did not produce a successful receipt.'
@@ -248,6 +284,9 @@ try {
         $receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json
         if ($receipt.gitHead -ne $head) {
             throw "Receipt HEAD '$($receipt.gitHead)' does not match pipeline HEAD '$head'."
+        }
+        if (($ExpectedHead -or $family -like 'IntelligentTerminal.Worktree.*') -and $receipt.packageFamily -cne $family) {
+            throw 'Build receipt does not match the selected Dev package family.'
         }
         $receiptCreated = if ($receipt.createdUtc -is [DateTime]) {
             [DateTimeOffset]$receipt.createdUtc
@@ -282,6 +321,7 @@ try {
         $state.e2eReportPath = Join-Path $e2eOutDir 'summary.md'
         $state.e2eResultsPath = Join-Path $e2eOutDir 'results.xml'
         Invoke-PipelinePhase -Name 'packaged-e2e' -Action {
+            Assert-PipelinePublishedHead
             if (Test-Path -LiteralPath $e2eOutDir) {
                 throw "E2E output directory unexpectedly exists before the run: $e2eOutDir"
             }
@@ -331,6 +371,7 @@ try {
     }
 
     Invoke-PipelinePhase -Name 'final-source-verification' -Action {
+        Assert-PipelinePublishedHead
         $receiptHash = (Get-FileHash -LiteralPath $state.receiptPath -Algorithm SHA256).Hash
         if ($receiptHash -ne $state.receiptSha256) {
             throw "Run-local build receipt changed after validation: expected=$($state.receiptSha256) actual=$receiptHash"

@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'LocalTdd.Acceptance.psm1') -Force
+. (Join-Path $PSScriptRoot 'DevTarget.ps1')
 
 function Invoke-LocalTddCargo {
     param([string]$RepoRoot, [string]$Configuration, [switch]$Test, [string]$SourceWtcli)
@@ -56,6 +57,9 @@ function Invoke-LocalTddWtaRefresh {
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][string]$NativeReceiptPath,
         [Parameter(Mandatory)][string]$OutDir,
+        [string]$PackageSelector = 'Dev',
+        [string]$PublicationPath,
+        [ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ExpectedHead,
         [ValidateSet('Debug')][string]$Configuration = 'Debug',
         [switch]$SkipWtaTests
     )
@@ -65,14 +69,20 @@ function Invoke-LocalTddWtaRefresh {
     $reference = Get-Content -LiteralPath $NativeReceiptPath -Raw | ConvertFrom-Json -AsHashtable
     $fingerprintScript = Join-Path $PSScriptRoot 'Get-LocalTddSourceFingerprint.ps1'
     $canonical = & $fingerprintScript -RepoRoot $RepoRoot
+    $family = Resolve-LocalTddDevFamily $PackageSelector
+    if ($ExpectedHead -and $canonical.Head -ne $ExpectedHead) { throw 'Source does not match the expected published head.' }
+    if ($PublicationPath) {
+        $publication = Get-Content -LiteralPath $PublicationPath -Raw | ConvertFrom-Json -AsHashtable
+        Assert-LocalTddRemoteHead $RepoRoot $publication $canonical.Head
+    }
     $scope = @($reference.sourcePaths | ForEach-Object { $_.Replace('\', '/').TrimEnd('/') })
     if (@($canonical.SourcePaths | Where-Object { $_ -notin $scope }).Count) {
         throw 'Native receipt source scope is incomplete; use a full-scope native build receipt.'
     }
-    if ($reference.schemaVersion -ne 1 -or $reference.installVerified -ne $true -or
+    if ($reference.schemaVersion -notin @(1,2) -or $reference.installVerified -ne $true -or
         $reference.configuration -ne $Configuration -or $reference.platform -ne 'x64' -or
         $reference.rustTarget -ne 'x86_64-pc-windows-msvc' -or
-        $reference.packageFamily -ne 'IntelligentTerminal_rd9vj3e6a2mbr') {
+        $reference.packageFamily -cne $family) {
         throw 'WTA refresh requires a verified Debug x64 Dev receipt.'
     }
     $committed = & $fingerprintScript -RepoRoot $RepoRoot -CommittedHead $reference.gitHead -SourcePaths $scope
@@ -90,10 +100,20 @@ function Invoke-LocalTddWtaRefresh {
         throw 'The existing single Dev registration does not match the native receipt layout.'
     }
     Assert-LocalTddUnusedLayout $reference.paths.appxLayout
+    if ($family -like 'IntelligentTerminal.Worktree.*') {
+        $clsid = Get-ItPrivateProtocolClsid $packages[0]
+        if ($reference.packageFullName -cne $packages[0].PackageFullName -or $clsid -ine $reference.privateProtocolClsid) {
+            throw 'Private registration no longer matches the native receipt.'
+        }
+    }
     $packageFullName = [string]$packages[0].PackageFullName
     $manifestPath = Join-Path $reference.paths.appxLayout 'AppxManifest.xml'
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath).Hash
     $recipeHash = (Get-FileHash -LiteralPath $reference.paths.recipe).Hash
+    if ($family -like 'IntelligentTerminal.Worktree.*' -and
+        ($manifestHash -ne $reference.manifestSha256 -or $recipeHash -ne $reference.recipeSha256)) {
+        throw 'Private manifest or native recipe changed since verification.'
+    }
     $sources = & (Join-Path $PSScriptRoot 'Get-AppxRecipePackageSources.ps1') -Path $reference.paths.recipe
     if ($sources.Count -ne $reference.paths.packageSources.Count) { throw 'Package recipe inventory changed.' }
     foreach ($name in $sources.Keys) {
@@ -105,7 +125,9 @@ function Invoke-LocalTddWtaRefresh {
     }
     if (-not $sources.Contains('wta.exe')) { throw 'Package recipe has no WTA source.' }
     Assert-LocalTddNativeFiles $reference -IncludeWta
-    $staged = Join-Path (Split-Path $reference.paths.appxLayout -Parent) 'wta.exe'
+    $stagingDir = if ($family -like 'IntelligentTerminal.Worktree.*') { Split-Path $reference.paths.recipe -Parent }
+        else { Split-Path $reference.paths.appxLayout -Parent }
+    $staged = Join-Path $stagingDir 'wta.exe'
     $installed = Join-Path $reference.paths.appxLayout 'wta.exe'
     if ($staged -ine $reference.paths.stagedWta -or $installed -ine $reference.paths.installedWta -or
         (Get-FileHash -LiteralPath $staged).Hash -ne $reference.hashes.wta) {
@@ -114,7 +136,7 @@ function Invoke-LocalTddWtaRefresh {
     if (Test-Path -LiteralPath $OutDir) { throw 'Use a new WTA refresh output directory.' }
     New-Item -ItemType Directory -Path $OutDir | Out-Null
     $statePath = Join-Path $OutDir 'refresh-state.json'
-    $lockPath = Join-Path (Split-Path $reference.paths.appxLayout -Parent) '.local-tdd-wta-refresh.lock'
+    $lockPath = Join-Path (Split-Path $reference.paths.appxLayout -Parent) ".$family.wta-refresh.lock"
     $state = @{
         schemaVersion = 1; status = 'running'; rollback = 'not-needed'; error = $null; rollbackError = $null
         head = $canonical.Head; startedUtc = [DateTimeOffset]::UtcNow.ToString('o')
@@ -155,6 +177,7 @@ function Invoke-LocalTddWtaRefresh {
         Assert-LocalTddUnusedLayout $reference.paths.appxLayout
         Assert-LocalTddNativeFiles $reference
         $hash = (Get-FileHash -LiteralPath $builtWta).Hash
+        if ($PublicationPath) { Assert-LocalTddRemoteHead $RepoRoot $publication $after.Head }
         foreach ($path in $destinations) {
             if ($path -ine $builtWta) { Copy-Item -LiteralPath $builtWta -Destination $path -Force }
             if ((Get-FileHash -LiteralPath $path).Hash -ne $hash) { throw 'WTA propagation hash mismatch.' }

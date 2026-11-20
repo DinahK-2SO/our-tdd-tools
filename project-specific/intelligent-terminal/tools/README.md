@@ -205,6 +205,42 @@ tests; WTA product compilation is never skipped. The ordinary full-build path is
 
 ### Bounded real-provider driver
 
+For private Dev validation, keep the toolkit separate from the clean publish
+checkout. In a separate native build checkout at the same SHA, follow the product's
+`doc/dev-worktree-package.md` to build and register a unique, inactive package.
+Use only its three documented identity substitutions; do not modify product
+logic or reuse another worktree's registration. With the new MSIX installed:
+
+```powershell
+& "$kit\New-LocalTddPrivateNativeReceipt.ps1" -RepoRoot $publish -ExpectedHead $sha `
+    -NativeBuildRoot $privateBuild -PackageFamily $pfn -MsixPath $msix -OutPath $nativeReceipt
+& "$kit\Invoke-LocalTddPipeline.ps1" -RepoRoot $publish -PublicationPath $publication `
+    -WtaOnly -NativeReceiptPath $nativeReceipt -OutDir $newRun
+```
+
+Set `packageFamily` in the local publication JSON to the exact private PFN.
+The pipeline compares the open PR and remote branch to the source before building
+and rechecks before writing WTA. The real scenario uses the verified receipt's
+family; it does not switch back to ordinary Dev. Use the resulting run-local
+build receipt with the bounded driver below.
+
+For regular open/push handoffs, invoke both phases through the publisher entry
+point instead of running them separately. Use the same state root and budget
+ledger on each push, a clean checkout pinned to the new SHA and a native receipt
+whose native inputs still match. Run this local command alongside online review:
+
+```powershell
+& "$kit\Invoke-LocalTddPublishedSmoke.ps1" -RepoRoot $publish -PublicationPath $publication `
+    -NativeReceiptPath $nativeReceipt -StateRoot $taskState -AuthorizationPath $approval `
+    -BudgetPath $ledger -AllowRealInference
+```
+
+Different heads get separate journals and a cooperative supersession marker;
+repeating a successful head reuses its outcome without another model call.
+Do not delete an unfinished journal to force a retry. Recover the prior run and
+its owned resources first. If a native input changed, rebuild the private native
+package and verify a new receipt before refreshing WTA.
+
 `Invoke-LocalTddRealAcceptance.ps1` implements the existing post-push requirement for local
 Copilot scenarios. It is not the optional `AiOracle.ps1` judge and is not part of formal E2E/CI.
 Copy the JSON examples into ignored evidence, fill the publication identity and observed push

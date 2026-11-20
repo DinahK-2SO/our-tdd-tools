@@ -106,6 +106,13 @@ Describe 'Receipt-constrained WTA refresh' -Tag 'Unit', 'WtaRefresh' {
         Should -Invoke -ModuleName LocalTdd.WtaRefresh Invoke-LocalTddCargo -Times 0
     }
 
+    It 'refuses a receipt for a different Dev family before building or modifying either layout' {
+        { Invoke-LocalTddWtaRefresh @script:refreshArgs -PackageSelector 'IntelligentTerminal.Worktree.other_rd9vj3e6a2mbr' } |
+            Should -Throw '*verified Debug x64 Dev receipt*'
+        Should -Invoke -ModuleName LocalTdd.WtaRefresh Invoke-LocalTddCargo -Times 0
+        (Get-FileHash "$script:layout\wta.exe").Hash | Should -Be $script:receipt.hashes.wta
+    }
+
     It 'refuses committed native changes and a narrowed source receipt' {
         'changed' | Add-Content "$script:repo\src\native.txt"
         & git -C $script:repo add .

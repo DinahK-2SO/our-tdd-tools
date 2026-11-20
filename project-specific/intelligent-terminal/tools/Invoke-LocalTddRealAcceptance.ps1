@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory)][string]$AuthorizationPath,
     [Parameter(Mandatory)][string]$BudgetPath,
     [Parameter(Mandatory)][string]$OutDir,
+    [string]$SupersessionPath,
     [switch]$AllowRealInference
 )
 $ErrorActionPreference = 'Stop'

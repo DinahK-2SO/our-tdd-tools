@@ -6,7 +6,7 @@
         Import-Module (Join-Path $context.repoRoot 'test\e2e\ItE2E\ItE2E.psd1') -Force -Global
         . (Join-Path $context.repoRoot 'test\e2e\tests\helpers\TestWindowKeyboardLayout.ps1')
         $state = $context.state
-        $state['target'] = Resolve-ItApp -Package Dev
+        $state['target'] = Resolve-ItApp -Package $context.receipt.packageFamily
         if (@(Get-WtProcessesForApp -App $state.target).Count) {
             throw 'The selected Dev package has user-owned windows; the scenario will not close them.'
         }
@@ -19,8 +19,8 @@
         $state['workspace'] = Join-Path $env:TEMP "ItE2E-real-marker-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $state.workspace | Out-Null
         $state['launchStarted'] = Get-Date
-        $state['app'] = Start-Terminal -Package Dev -PassFre $true -Settings @{
-            acpAgent = 'copilot'; acpModel = ''; 'warning.confirmOnClose' = 'never'
+        $state['app'] = Start-Terminal -Package $context.receipt.packageFamily -PassFre $true -Settings @{
+            acpAgent = 'copilot'; acpModel = ''; agentSessionManagementEnabled = $false; 'warning.confirmOnClose' = 'never'
         }
         $shell = New-WtTab -App $state.app -Command 'pwsh.exe -NoLogo -NoExit' -Cwd $state.workspace
         Set-WtPaneFocus -App $state.app -SessionId $shell.session_id | Out-Null
@@ -112,16 +112,9 @@
             finally {
                 if ($state['app']) { Stop-Terminal -App $state.app }
                 elseif ($state['launchStarted']) {
-                    foreach ($process in @(Get-WtProcessesForApp -App $state.target)) {
-                        if ($process.Path -ine $state.target.WindowsTerminal -or $process.StartTime -lt $state.launchStarted) {
-                            throw 'Cannot prove ownership of a failed-startup process.'
-                        }
-                        $recovery = $state.target.PSObject.Copy()
-                        $recovery.Pid = $process.Id
-                        $recovery | Add-Member -NotePropertyName Launched -NotePropertyValue $true -Force
-                        Stop-Terminal -App $recovery -RestoreSettings $false
+                    if (@(Get-WtProcessesForApp -App $state.target).Count) {
+                        throw 'Startup returned no owned process identity; leaving the active package and backups untouched.'
                     }
-                    Restore-WtConfig -App $state.target
                 }
             }
         }

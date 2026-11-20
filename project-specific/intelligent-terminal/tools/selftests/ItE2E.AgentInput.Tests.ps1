@@ -16,9 +16,10 @@ Describe 'Local TDD agent input capability' -Tag 'AgentInput' -Skip:(-not $scrip
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($invocation))
         $command = "pwsh -NoProfile -EncodedCommand $encoded"
 
-        $script:app = Start-Terminal -Package (Get-ItTestPackage) -PassFre $true -CloseExistingInstances -Settings @{
+        $script:app = Start-Terminal -Package (Get-ItTestPackage) -PassFre $true -Settings @{
             acpAgent = 'custom:local-tdd-echo'
             acpCustomCommand = $command
+            agentSessionManagementEnabled = $false
         }
         $shell = Get-ActivePane -App $script:app
         Open-AgentPane -App $script:app | Out-Null

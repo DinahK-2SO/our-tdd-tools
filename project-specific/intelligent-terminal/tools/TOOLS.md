@@ -58,7 +58,7 @@ This prevents a recycled HWND or unrelated foreground application from receiving
 test input.
 
 ```powershell
-$app = Start-Terminal -Package Dev -CloseExistingInstances
+$app = Start-Terminal -Package (Get-ItTestPackage)
 
 # Exact launched-window identity and client bounds.
 $identity = Get-WtWindowIdentity -App $app
@@ -107,9 +107,9 @@ Stop-Terminal -App $app
 - Coordinate mouse and OS keyboard tests require an unlocked interactive desktop.
 - `Start-Terminal` acquires a machine-local foreground-input lease. Do not run foreground-input
   suites in parallel or bypass that lease with feature-local input code.
-- Existing Intelligent Terminal windows make `Start-Terminal` fail closed. Automated suites that
-  own the machine-side test session must pass `-CloseExistingInstances`; the cleanup remains
-  constrained to executable paths under exact Intelligent Terminal package install locations.
+- Existing windows of other packages are not test inputs. Pin the selected family; leave
+  pre-existing Store and private-package windows alone. Only an authorized ordinary Dev
+  cold start can use `-CloseExistingInstances`. Normal teardown uses the captured launch identity.
   Never terminate `WindowsTerminal.exe` or `wta.exe` by name, and never terminate the process tree
   hosting the current shell/conversation.
 - Coordinates are relative to the window client area, not the screen.
