@@ -52,8 +52,12 @@ After setup, the agent creates or resumes `test_plan.md` at the dev worktree
 root. The generated `AGENTS.md` contains the leaf template and checkpoint
 rules. Commit new plans and revisions to pending steps separately with a
 `[change plan]` subject prefix. Work one leaf at a time; commit its verified
-result with the fix and tests. With dev pushes authorized, push each checkpoint
-before proceeding. Another machine resumes from the remote dev branch, not
+result with the fix and tests. Implementation tasks normally deliver a PR:
+push checkpoints to the selected dev branch and shareable product changes to
+the publish branch without a second approval. An unavailable dev remote does
+not prevent local tests or opening a PR from a working publish branch. Use a
+draft PR to report pending or failed checks; opening it does not authorize merge.
+Another machine resumes from the remote dev branch, not
 from a chat transcript. Setup itself does not create commits or push a plan.
 
 The same command works in an unrelated repository, without Terminal installed.
@@ -101,6 +105,8 @@ An explicit COM override must be a non-empty GUID, and a configuration path
 override must be absolute. Unknown real targets are not replaced with mock values.
 Setup only records these values in the contract: it does not query installed
 packages, build, deploy, launch or read the selected configuration file.
+During development, install or refresh the worktree's Dev package and run local
+tests in a test-owned window without waiting for a push, a PR or separate approval.
 
 The generated project contract explains the runtime bindings: `ITE2E_PACKAGE`,
 `ITE2E_WT_COM_CLSID` and `ITE2E_COPILOT_CONFIG`. The relevant helpers also accept
@@ -309,8 +315,9 @@ project profile. Personal tools can extend either workflow locally.
 
 Setup only installs these capabilities. It does not start a watcher, send desktop
 input, inspect screenshot pixels, switch accounts or call an AI provider.
-Availability imposes no mandatory screenshot or model-request gate. Live calls
-need explicit targets, authorization and, for inference, a finite request budget.
+Availability imposes no mandatory screenshot or model-request gate. Local UI tests
+use a verified, test-owned target. Real account access or inference requires
+authorization and, for inference, a finite request budget.
 
 ## Contents
 

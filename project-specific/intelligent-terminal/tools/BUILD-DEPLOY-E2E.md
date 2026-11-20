@@ -30,31 +30,30 @@ from actual online execution, and real-login dependencies are dev/local-only eve
 | Terminal protocol or `wtcli` | owning protocol/CLI project | Yes |
 | Windows host/window | WindowsTerminal | Yes |
 | Static hook/assets/manifests | CascadiaPackage, clean staging when globs change | Yes |
-| Pure local test/docs script | relevant Pester/document checks | No build by HEAD change alone; follow the explicit applicable plan and established gate dispositions |
+| Pure local test/docs script | relevant Pester/document checks | No deployment for a dev-only edit; a new published PR head still runs the smoke below |
 
 Focused builds are the fast discriminating check. `CascadiaPackage` is the final
 integration build because it gathers all product outputs into the staged AppX.
 
 ## Applicable Post-Push Deployment and Real Dependency Gate
 
-Pre-push builds allow publication for review; they do not complete required acceptance.
-Record `REAL_ACCEPTANCE_REQUIRED` and the validation plan rather than requiring inference for
-all changed HEADs. Preparation/dev-only records do not deploy a product. Deterministic tests/docs
-use their explicit plan; any change to established real/exact-head gates needs scoped disposition.
-
-When a post-push real dependency gate is required, read PR/remote heads, require exact clean
-publish HEAD equality, then build/deploy that revision and create a fresh receipt.
+Open the PR first. Immediately after opening it and each successful push of a
+new PR head, read the PR and remote publish heads, require exact clean publish
+HEAD equality, then build/deploy that revision and create a fresh receipt.
+Run a local real-agent round trip in parallel with online review and CI, even
+for documentation or test changes. Dev-only checkpoints are not triggers.
 Correct incremental builds are allowed; old packages or parent receipts do not replace this gate.
 Run the explicitly selected dev-only harness through normal product entrypoints.
-Authentication-only acceptance proves actual user authorization and a usable session;
-model/tool acceptance requires a real inference round and its specified downstream result.
+Authentication-only coverage can be an additional feature check; it does not
+replace the mandatory real inference round and its observable result.
 Keep all real-account/login-dependent or token-consuming source, configuration and reports
 local-only, outside publish, formal `test/e2e` and indirect CI calls.
 Default Live/AgentInput examples are deterministic coverage, not proof of a real dependency gate.
 
 Record push/build/deploy/inference timestamps, exact source/package/live identity, provider/model,
 available usage, behavior oracles and fresh inspected UI screenshots. Complete scoped cleanup and
-re-read the PR/remote heads at the end. A newer head still covered by this real gate needs a fresh cycle.
+re-read the PR/remote heads at the end. A newer pushed head supersedes an unfinished
+cycle immediately; only the newest head's own evidence counts.
 FAIL, BLOCKED, UNKNOWN and not-run prohibit completion or ready-for-merge claims.
 Only explicit user deferral/waiver for a named iteration can pause this requirement; record the
 date, SHA and scope without reporting PASS. Dev-only handoff/template pushes are not product pushes.

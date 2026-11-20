@@ -29,10 +29,11 @@ Describe 'TDD practice and test admission contract' -Tag 'Unit' {
         }
     }
 
-    It 'records applicability instead of unconditionally demanding inference for every head' {
-        $script:workflow | Should -Match 'REAL_ACCEPTANCE_REQUIRED'
-        $script:workflow | Should -Not -Match ([regex]::Escape(
-            'Every initial PR publication and subsequent published iteration must pass this gate'))
+    It 'distinguishes mandatory published-head smoke from optional feature-specific scenarios' {
+        $workflow = $script:workflow -replace '\s+', ' '
+        $workflow | Should -Match 'docs-only and test-only'
+        $workflow | Should -Match 'REAL_ACCEPTANCE_REQUIRED.{0,160}additional'
+        $workflow | Should -Match 'superseded-by\.txt'
     }
 
     It 'keeps preparation and discussion pauses distinct from accepted product behavior' {
@@ -40,6 +41,13 @@ Describe 'TDD practice and test admission contract' -Tag 'Unit' {
         $script:workflow | Should -Match 'PAUSED_USER_DISCUSSION'
         $script:boundaries | Should -Match 'Preparation completion is not product completion|Preparation and paused discussion'
         $script:boundaries | Should -Match 'generic completion reminder'
+    }
+
+    It 'allows local tests before publication and a draft PR before validation finishes' {
+        $workflow = $script:workflow -replace '\s+', ' '
+        $workflow | Should -Match 'before a PR exists.*local revision'
+        $workflow | Should -Match 'open a draft PR.*local validation.*still pending'
+        $workflow | Should -Not -Match 'once the publish branch is clean and has deterministic RED/GREEN'
     }
 
     It 'keeps explicit skip and review dispositions from becoming fabricated passes' {

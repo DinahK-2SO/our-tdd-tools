@@ -79,22 +79,19 @@ deployment, restore owned fixture configuration, then transfer the normal app to
 `USER_MANUAL_RESERVED`. A successful manual check does not release the app for
 automatic input, redeployment or cleanup.
 
-## Applicable Post-Push Acceptance
+## Required local smoke after PR publication
 
-Record change kind, validation plan and `REAL_ACCEPTANCE_REQUIRED` with its reason.
-Preparation/docs do not trigger deployment/inference by a new Git HEAD alone.
-Deterministic tests/tooling run the applicable suites; product changes require affected-layer
-build/integration evidence. Publishability does not prove the online pipeline executed a test.
-Any narrower disposition of established gates must be explicit, not an implied PASS.
-
-When real dependency acceptance is required, build/deploy **after push succeeds** and execute
-its actual oracle on that exact product. Authentication-only acceptance proves real user
-authorization and a usable session; real-model/tool acceptance additionally needs inference
-and required side effects. Fixtures and unauthenticated handshakes cannot replace either.
+Opening an Intelligent Terminal PR or pushing a new head to it starts a local
+Dev build, deployment and real-agent smoke immediately, in parallel with review
+and CI. The publisher starts it, not setup or the 30-minute review monitor.
+Dev-only work without a published PR head does not trigger it. Use the bounded
+real-provider driver below. A mock, login check, earlier local build or previous
+head's result is not a substitute. `REAL_ACCEPTANCE_REQUIRED` selects additional
+feature-specific scenarios; it cannot switch off the baseline.
 
 Read the PR and remote publish heads before starting and after finishing; both must equal the clean
 publish worktree's full SHA and this run's build/deploy/inference evidence. If the published HEAD
-advances while the real gate is still required, rerun it before claiming that acceptance.
+advances, supersede the outdated run and start the newest head; do not queue intermediate builds.
 Use normal product entrypoints and a feature-specific observable outcome. Required user sign-in
 is completed by the user, not automated credential handling. Inference uses an already authenticated
 provider/model and a confirmed finite budget. Record fresh hashes, applicable real evidence and
@@ -226,6 +223,14 @@ Both the switch and `approved: true` are required. The ledger reserves a request
 submission and retains all outcomes. An interrupted reservation remains charged: there is no
 automatic refund or retry. `totalLimit`, `perHeadLimit` and `timeoutSeconds` come from the explicit
 authorization; increasing a limit never deletes earlier attempts.
+
+To supersede a running driver, atomically rename a temporary file containing
+the new remote head's full SHA to `superseded-by.txt` in the old run's own
+output directory. The old run releases its owned resources through scenario
+cleanup; a submitted request remains charged with unknown outcome. Never reuse
+that directory, its receipt, or its result for the new head. Cleanup errors
+remain failures. Start the newest build immediately; wait for any conflicting
+deployment or desktop lease to be released before using that resource.
 The example authorization uses the general autopilot baseline `totalLimit: 8`,
 `perHeadLimit: 2`, and `timeoutSeconds: 600`: up to four publish iterations with one diagnosed
 retry per HEAD, while preventing an individual real-provider request from waiting indefinitely.
@@ -391,7 +396,8 @@ Before a publish push or authorized public-text write, run
 complete new commit range and proposed title/body/comment files, returning pinned
 commits and exact text hashes. Keep it in the private kit; do not import it into
 publish to make tests run. It catches known private markers, not arbitrary secrets
-or all dependency leaks, and never performs or authorizes the public write.
+or all dependency leaks, and never performs the public write. If the helper
+cannot run, inspect the same commits and text directly as in `TEST-BOUNDARIES.md`.
 
 ## Dev/publish reference isolation
 
@@ -410,7 +416,8 @@ pwsh -File local-tdd-kit/Test-DevPublishReferenceIsolation.ps1 `
 The script reads `LOCAL_TDD_PUBLISH_PR_NUMBER` and `LOCAL_TDD_PUBLISH_BRANCH`, scans every dev-only
 commit message and added patch line after the base, and also scans current changed/untracked text
 files. Safe blank patch lines and empty text files are valid input. A script or parameter-binding
-error is a tooling failure, not a reference finding or a successful scan; fix it before push.
+error is a tooling failure, not a reference finding or a successful scan. Inspect
+the dev range directly or keep that checkpoint local; this is not a product PR or test gate.
 If a reference was already published, obtain explicit
 user approval before rewriting history and use exact `--force-with-lease`; a rewrite does not
 guarantee deletion of an existing public timeline event.

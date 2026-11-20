@@ -44,8 +44,8 @@ keep RED, the fix, GREEN and the control for one behavior together.
    Inspect the staged diff; do not include setup output or implementation.
 2. Work on one dependency-ready leaf at a time. Mark it in progress, then
    verify and fix until its acceptance and relevant controls pass. If blocked,
-   append the reason and stop or plan the prerequisite; never weaken the
-   acceptance criterion to turn a failure green.
+   record the reason against that leaf and continue independent work. Never
+   weaken the acceptance criterion to turn a failure green.
 3. Mark the leaf verified and append its actual results in the **same dev
    commit** as the implementation and tests. Start its subject with the step ID
    (example: `S02: Keep activation unchanged while browsing`). A completion
@@ -56,11 +56,10 @@ keep RED, the fix, GREEN and the control for one behavior together.
    and prior evidence; add a linked follow-up for a verified step rather than
    rewriting it. Record out-of-scope discoveries without silently adding work.
    Commit these planning changes alone, even if discovered during a fix.
-5. Push each plan or verified-step checkpoint to the confirmed dev branch
-   before continuing. Obtain authorization for recurring dev pushes and confirm
-   the destination as described below; neither setup nor a target mapping grants
-   that permission. If not authorized, or if a push fails, stop and identify
-   the local-only checkpoint. Never force-push to resolve divergence.
+5. Push each plan or verified-step checkpoint to the configured dev branch for
+   a PR-delivery task. If a dev push fails, identify the local-only checkpoint
+   and continue local testing or delivery on the independent publish branch.
+   Never force-push to resolve divergence.
 
 On another machine, fetch the confirmed dev branch, read the plan and match
 the last verified entry to its step commit. Restore local prerequisites and
@@ -84,6 +83,11 @@ and machine-specific paths. Do not copy the task plan into publish history.
 
 ## Validation boundaries
 
+Run local tests on the working revision without waiting for a push or PR. This
+includes building, installing or refreshing an isolated test target and driving
+a test-owned session. If a prerequisite is missing, record which case could
+not run and continue the independent checks.
+
 Prefer product-owned observable state over model prose. A mock proves its declared
 boundary, not a real provider outcome. Only require screenshots or real-model
 acceptance when the active task contract calls for them.
@@ -95,6 +99,14 @@ different states.
 
 ## Ownership and publication
 
+For implementation work, deliver a pull request unless the user asks for
+local-only, plan-only or review-only work. The task covers normal dev and
+publish pushes and PR creation at the configured destinations; do not ask for
+a separate publishing approval. With a shareable change, open a draft PR
+without waiting for local validation, CI or human review if work is unfinished.
+Report missing or failed checks accurately and update the PR as results arrive.
+Opening a PR is not acceptance or permission to merge.
+
 Keep the toolbox, private customizations and local evidence out of product publish
 history. Transfer only self-contained product changes and tests that use the
 product's own public test framework. Do not copy private tooling to satisfy missing
@@ -102,19 +114,18 @@ test dependencies in publish.
 
 Preserve original project instructions, unrelated changes, credentials, settings,
 current chat ancestry and user-controlled apps. Never force cleanup or switch
-accounts to obtain a passing result. Model requests, application control and
-publication require their own explicit authorization.
+accounts to obtain a passing result. Get permission before using real provider
+credentials or quota, or taking control of a user-owned application.
 
-Before any authorized publication, inspect every candidate commit and exact
-outgoing text. Review full current-head findings and annotations, not only a
+Inspect every candidate commit and exact outgoing text for private content.
+After opening the PR, review full current-head findings and annotations, not only a
 headline or reply count. Do not claim a watcher is active unless it was started
 and its lifecycle is recorded.
 
 Use the repository's PR template and selected user profile for public language,
 length limits and review interaction preferences. Keep actual validation results
-and preserve other authors' work. A personal preference does not authorize public
-writes, thread resolution or merging. Confirm each branch's push target before
-publishing; the source `BaseRemote` is not its push destination.
+and preserve other authors' work. Do not infer permission to resolve threads
+or merge. The source `BaseRemote` is not a branch's push destination.
 
 ## Confirm push destinations
 
@@ -133,14 +144,14 @@ Resolve missing targets before the first publish; setup itself remains non-inter
    is found, suggest the source repository only when writable; otherwise ask for
    targets or permission to create a fork.
    Never infer write permission from ownership alone.
-4. Present one confirmation: account/host, dev repo + branch, publish repo + branch,
+4. For unresolved destinations, present one confirmation: account/host, dev repo + branch, publish repo + branch,
    PR base repo + branch, and repository visibility. Let the user override either
    target. For non-GitHub or unavailable discovery, ask for explicit mappings.
    Neither branch may contain secrets or sensitive local state; dev is not private storage.
 5. After confirmation, record mappings in ignored task state and configure remotes /
    branch `pushRemote` only as authorized; preserve existing conflicting settings.
-   Target confirmation does not authorize a push. Do not create forks or change
-   authentication without separate approval.
+   Use the resolved destinations for the task without another confirmation.
+   Do not create forks or change authentication without separate approval.
 
 ## Online PR review monitoring
 

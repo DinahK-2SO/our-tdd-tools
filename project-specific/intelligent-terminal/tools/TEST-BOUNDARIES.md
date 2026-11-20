@@ -59,7 +59,8 @@ real-model acceptance.
 Before dev-to-publish transfer:
 
 1. Inspect the complete new commit range, dependency imports and invocation paths.
-2. Prove tests discover and run in a clean publish worktree without this private kit.
+2. Check that public tests do not depend on this private kit. Run them in a clean
+   publish worktree; record pending, blocked or failed validation in the PR.
 3. Confirm no test consumes provider quota or depends on an authenticated account.
 4. Keep real-acceptance source, runners and reports dev/local-only; keep credentials
    and sensitive account/provider state out of Git entirely.
@@ -86,8 +87,9 @@ bytes and recheck the target head/lifecycle before the authorized write.
 
 This is a known-marker audit, not a complete dependency or secret scanner,
 proof of test execution, or permission to publish. Inspect dependencies, binary
-content and task-specific private disclosures separately. Tool/read failures
-block the operation; they are not a clean audit. Keep audit output local rather
+content and task-specific private disclosures separately. If the helper fails,
+inspect the same range and outgoing text directly; a failed scan is not a pass.
+Keep unreadable or unsafe content out of the PR. Keep audit output local rather
 than pasting it into public prose. This command is for public candidates, not
 for publishing the intentionally private toolkit to its designated source branch.
 
@@ -117,14 +119,16 @@ feature contract.
 
 ## Validation is scoped to the actual contract
 
-Record `CHANGE_KIND`, `VALIDATION_PLAN`, `REAL_ACCEPTANCE_REQUIRED` and its reason
-before implementation. Keep explicit authorization for a narrower plan when it
-changes previously agreed gates; never infer a waiver from a convenient result.
+The table below scopes feature-specific coverage. Independently, opening an
+Intelligent Terminal PR and pushing a new head to it each require a local
+real-agent smoke on that freshly built and deployed SHA. It runs alongside
+online review; neither CI nor the publish branch contains the real runner.
+Use `REAL_ACCEPTANCE_REQUIRED` for additional scenarios, not to waive the smoke.
 
 | Change or acceptance target | Required evidence |
 | --- | --- |
 | Preparation, discussion or dev-only documentation | Accurate stage/scope, relevant document checks and remote proof if pushed; no product deployment or inference |
-| Deterministic tests/tooling with unchanged product inputs | Actual focused/relevant tests and dependency checks; no automatic model request just because a Git HEAD changed |
+| Deterministic tests/tooling with unchanged product inputs | Actual focused tests and dependency checks; dev-only commits do not trigger the published-head smoke |
 | Product behavior | Focused RED/GREEN, relevant full tests/build and observable integration coverage for the affected layers |
 | Real authentication only | Real user action and authenticated session/reconnect when required; producing a model token is not itself an authentication oracle |
 | Real model/provider/tool contract | Real inference and required downstream effect on the exact approved product, in a dev/local-only runner |
@@ -141,8 +145,8 @@ provenance and verified unchanged product inputs. Never describe an old binary
 as newly built from the validation HEAD. A changed product path, even a comment,
 invalidates a byte-level source fingerprint.
 
-Post-push real acceptance is required when the active contract says so. Keep
-its exact-head, post-push ordering, budget, cleanup and privacy checks intact.
+The mandatory smoke cannot reuse an old deployment or a superseded head's
+result. Keep its exact-head, post-push ordering, budget, cleanup and privacy checks intact.
 `Test-LocalTddAcceptance.ps1` validates the existing real-Copilot evidence contract;
 it is not a universal completion checker for unrelated documentation/mock work.
 Do not weaken that real-evidence schema to mark a non-real workflow accepted.
